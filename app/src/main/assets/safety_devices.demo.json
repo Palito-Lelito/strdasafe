@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "territory": "Liguria",
+  "updated_at": "2026-09-25",
+  "status": "DEMO_ONLY",
+  "devices": [
+    {
+      "id": "demo-ge-001",
+      "type": "fixed",
+      "lat": 44.407,
+      "lon": 8.934,
+      "direction_deg": 90,
+      "speed_limit": 50,
+      "source": "DEMO - NON UFFICIALE"
+    }
+  ]
+}
