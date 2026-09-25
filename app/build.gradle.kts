@@ -5,16 +5,14 @@ plugins {
 }
 
 android {
-    namespace = "it.stradasafe.liguria"
-    compileSdk = 36
-    defaultConfig {
-        applicationId = "it.stradasafe.liguria"
-        minSdk = 26
-        targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0-alpha"
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
-    buildFeatures { compose = true }
+    
+    kotlinOptions {
+        jvmTarget = "17"
+    }
 }
 
 dependencies {
