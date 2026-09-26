@@ -15,6 +15,15 @@ android {
         versionName = "0.4.0-alpha"
     }
     buildFeatures { compose = true }
+    
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+}
+
+kotlin {
+    jvmToolchain(17)
 }
 
 dependencies {
