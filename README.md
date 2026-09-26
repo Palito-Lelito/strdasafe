@@ -1,33 +1,17 @@
-# StradaSafe Liguria 0.2 alpha
+# StradaSafe Liguria v0.5
 
-Progetto Android privato e installabile via APK. La versione 0.2 collega realmente il GPS del telefono alla velocità mostrata, gestisce il permesso di posizione e include una UI automotive adattiva.
+Aggiornamento GitHub-ready compilabile senza Android Studio.
 
-## Funziona ora
+## Funzioni v0.5
+- mappa reale della Liguria
+- GPS e ricentraggio
+- ricerca località/indirizzi entro la Liguria
+- calcolo del percorso automobilistico
+- pannello navigazione e velocità GPS
+- workflow GitHub Actions che genera `StradaSafe-Liguria-v0.5.apk`
 
-- richiesta del permesso GPS;
-- aggiornamenti GPS ad alta precisione ogni secondo;
-- velocità reale del dispositivo in km/h;
-- stato e precisione del fix;
-- ricerca e navigazione dimostrative;
-- tema giorno/notte;
-- nessun account, pubblicità o telemetria applicativa.
+## Installazione nel repository
+Caricare tutti i file mantenendo le cartelle. In GitHub aprire Actions, eseguire `Build StradaSafe APK`, quindi scaricare l'artefatto.
 
-## Ancora da integrare prima dell'uso stradale
-
-- mappa vettoriale offline della Liguria;
-- geocoding e routing offline;
-- istruzioni reali e ricalcolo;
-- database ufficiale verificato di autovelox/Tutor;
-- limiti stradali collegati al tratto percorso;
-- firma release stabile.
-
-## Compilazione
-
-1. Apri la cartella con Android Studio e JDK 17.
-2. Attendi Gradle Sync. La prima sincronizzazione richiede Internet.
-3. Collega il telefono con debug USB oppure crea l'APK con `Build > Build APK(s)`.
-4. APK: `app/build/outputs/apk/debug/app-debug.apk`.
-
-## Avvertenza
-
-Questa alpha usa percorso, limite e avviso dimostrativi. Non usarla come unico ausilio durante la guida. Osserva sempre la segnaletica reale.
+## Limiti importanti
+Questa versione usa connessione Internet per tessere cartografiche, ricerca e routing. Non include ancora mappe/routing offline, guida vocale turn-by-turn, limiti stradali verificati o database ufficiale di autovelox/Tutor. Gli avvisi non sono presenti per evitare dati incompleti o inventati. Osservare sempre la segnaletica reale.
