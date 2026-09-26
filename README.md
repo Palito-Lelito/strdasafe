@@ -1,17 +1,19 @@
-# StradaSafe Liguria v0.5
+# StradaSafe Liguria v0.6
 
-Aggiornamento GitHub-ready compilabile senza Android Studio.
+Versione GitHub-ready compilabile senza Android Studio.
 
-## Funzioni v0.5
-- mappa reale della Liguria
-- GPS e ricentraggio
-- ricerca località/indirizzi entro la Liguria
-- calcolo del percorso automobilistico
-- pannello navigazione e velocità GPS
-- workflow GitHub Actions che genera `StradaSafe-Liguria-v0.5.apk`
+## Novità
+- aggiornamenti GPS continui ad alta precisione
+- indicazioni progressive ricavate dal percorso
+- voce italiana tramite sintesi vocale del dispositivo
+- pulsante audio
+- ricalcolo automatico dopo una deviazione superiore a circa 65 metri
+- orario stimato di arrivo, distanza e velocità GPS
+- schermo mantenuto acceso durante l'uso
+- interfaccia di navigazione più leggibile
 
-## Installazione nel repository
-Caricare tutti i file mantenendo le cartelle. In GitHub aprire Actions, eseguire `Build StradaSafe APK`, quindi scaricare l'artefatto.
+## Generare l'APK
+Caricare il contenuto nella radice del repository, aprire Actions e avviare `Build StradaSafe APK`. Scaricare l'artefatto `StradaSafe-Liguria-v0.6`.
 
-## Limiti importanti
-Questa versione usa connessione Internet per tessere cartografiche, ricerca e routing. Non include ancora mappe/routing offline, guida vocale turn-by-turn, limiti stradali verificati o database ufficiale di autovelox/Tutor. Gli avvisi non sono presenti per evitare dati incompleti o inventati. Osservare sempre la segnaletica reale.
+## Limiti
+La v0.6 richiede Internet per mappa, ricerca e routing. Non contiene ancora mappe offline, traffico, limiti stradali verificati o database ufficiale di autovelox/Tutor. Il simbolo del limite mostra `–` appositamente, finché il limite reale non è disponibile. Seguire sempre segnaletica e Codice della strada.
