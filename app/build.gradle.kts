@@ -6,34 +6,17 @@ plugins {
 
 android {
     namespace = "it.stradasafe.liguria"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "it.stradasafe.liguria"
-        minSdk = 24
-        targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        minSdk = 26
+        targetSdk = 36
+        versionCode = 3
+        versionName = "0.3.0-alpha"
     }
 
-    buildTypes {
-        release {
-            isMinifyEnabled = false
-        }
-    }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
-    buildFeatures {
-        compose = true
-    }
+    buildFeatures { compose = true }
 }
 
 dependencies {
@@ -44,5 +27,6 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.1")
     implementation("com.google.android.gms:play-services-location:21.3.0")
+    implementation("org.maplibre.gl:android-sdk:13.6.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
