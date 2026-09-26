@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.strdasafe"
+    namespace = "it.stradasafe.liguria"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.example.strdasafe"
+        applicationId = "it.stradasafe.liguria"
         minSdk = 24
         targetSdk = 34
         versionCode = 1
