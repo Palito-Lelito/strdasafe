@@ -1,0 +1,8 @@
+<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><meta name="theme-color" content="#07131d">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><link rel="stylesheet" href="app.css"></head>
+<body><div id="map"></div>
+<header><div><b>STRADASAFE</b><small>LIGURIA · v0.5</small></div><button id="locate" aria-label="Ricentra">⌖</button></header>
+<section id="search"><input id="query" placeholder="Cerca una destinazione in Liguria" autocomplete="off"><button id="go">CERCA</button><div id="results"></div></section>
+<section id="drive" class="hidden"><div class="maneuver"><b id="instruction">Percorso pronto</b><span id="next">Premi Avvia</span></div><div class="metrics"><div><strong id="speed">0</strong><small>km/h</small></div><div><strong id="distance">–</strong><small>restanti</small></div><div class="limit"><strong>50</strong></div></div><button id="start">AVVIA NAVIGAZIONE</button><button id="stop" class="sub">TERMINA</button></section>
+<footer><span id="status">In attesa del GPS…</span><span>© OpenStreetMap contributors</span></footer>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script src="app.js"></script></body></html>
