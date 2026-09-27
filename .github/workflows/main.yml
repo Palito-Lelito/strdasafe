@@ -27,10 +27,10 @@ jobs:
           gradle-version: "8.11.1"
 
       - name: Verifica Gradle
-        run: gradle --version
+        run: ./gradlew --version
 
       - name: Compila APK Debug
-        run: gradle :app:assembleDebug --stacktrace
+        run: ./gradlew :app:assembleDebug --stacktrace --info --no-daemon
 
       - name: Carica APK
         uses: actions/upload-artifact@v4
