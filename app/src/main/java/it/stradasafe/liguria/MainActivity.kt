@@ -3,227 +3,141 @@ package it.stradasafe.liguria
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
+import android.location.Location
 import android.os.Bundle
-import android.os.Looper
-import android.view.WindowManager
-import android.webkit.GeolocationPermissions
-import android.webkit.WebChromeClient
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.speech.tts.TextToSpeech
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import com.google.android.gms.location.FusedLocationProviderClient
-import com.google.android.gms.location.LocationCallback
-import com.google.android.gms.location.LocationRequest
-import com.google.android.gms.location.LocationResult
-import com.google.android.gms.location.LocationServices
-import com.google.android.gms.location.Priority
+import com.google.android.gms.location.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import org.maplibre.android.MapLibre
+import org.maplibre.android.camera.CameraPosition
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.geometry.LatLngBounds
+import org.maplibre.android.maps.MapView
+import org.maplibre.android.maps.Style
+import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.PropertyFactory.*
+import org.maplibre.android.style.sources.GeoJsonSource
+import org.maplibre.geojson.Feature
+import org.maplibre.geojson.LineString
+import org.maplibre.geojson.Point
+import java.net.HttpURLConnection
+import java.net.URLEncoder
+import java.net.URL
+import java.util.Locale
+import kotlin.math.*
 
-class MainActivity : AppCompatActivity() {
+private val Navy=Color(0xFF07131D); private val Panel=Color(0xEE102635); private val Cyan=Color(0xFF39D5FF); private val Amber=Color(0xFFFFC857)
+private const val STYLE_URL="https://tiles.openfreemap.org/styles/liberty"
+private const val SEARCH_BASE="https://nominatim.openstreetmap.org"
+private const val ROUTE_BASE="https://router.project-osrm.org"
 
-    private lateinit var web: WebView
-    private lateinit var client: FusedLocationProviderClient
-
-    private val request: LocationRequest =
-        LocationRequest.Builder(
-            Priority.PRIORITY_HIGH_ACCURACY,
-            1500L
-        )
-            .setMinUpdateIntervalMillis(800L)
-            .setMinUpdateDistanceMeters(2f)
-            .build()
-
-    private val callback = object : LocationCallback() {
-        override fun onLocationResult(result: LocationResult) {
-            val location = result.lastLocation ?: return
-
-            val speedKmh =
-                if (location.hasSpeed()) {
-                    location.speed * 3.6
-                } else {
-                    0.0
-                }
-
-            val bearing =
-                if (location.hasBearing()) {
-                    location.bearing
-                } else {
-                    0f
-                }
-
-            if (::web.isInitialized) {
-                val javascript =
-                    "window.nativeLocation&&window.nativeLocation(" +
-                        "${location.latitude}," +
-                        "${location.longitude}," +
-                        "$speedKmh," +
-                        "$bearing," +
-                        "${location.accuracy}" +
-                        ");"
-
-                web.evaluateJavascript(javascript, null)
-            }
-        }
-    }
-
-    private val permissionLauncher =
-        registerForActivityResult(
-            ActivityResultContracts.RequestMultiplePermissions()
-        ) { permissions ->
-            val locationGranted =
-                permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
-                    permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-
-            if (locationGranted) {
-                startGps()
-            }
-        }
-
-    @SuppressLint("SetJavaScriptEnabled")
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
-        client = LocationServices.getFusedLocationProviderClient(this)
-
-        web = WebView(this)
-        setContentView(web)
-
-        web.settings.apply {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            databaseEnabled = true
-            allowFileAccess = true
-            allowContentAccess = true
-            mixedContentMode = 0
-        }
-
-        web.settings.setGeolocationEnabled(true)
-
-        web.webViewClient = WebViewClient()
-
-        web.webChromeClient = object : WebChromeClient() {
-            override fun onGeolocationPermissionsShowPrompt(
-                origin: String?,
-                callback: GeolocationPermissions.Callback?
-            ) {
-                callback?.invoke(origin, true, false)
-            }
-        }
-
-        web.loadUrl("file:///android_asset/index.html")
-
-        web.postDelayed(
-            {
-                ensureLocationPermission()
-            },
-            900L
-        )
-    }
-
-    private fun ensureLocationPermission() {
-        val fineLocationGranted =
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-
-        val coarseLocationGranted =
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-
-        if (fineLocationGranted || coarseLocationGranted) {
-            startGps()
-        } else {
-            permissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
-                )
-            )
-        }
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun startGps() {
-        val fineLocationGranted =
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-
-        val coarseLocationGranted =
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-
-        if (!fineLocationGranted && !coarseLocationGranted) {
-            return
-        }
-
-        client.requestLocationUpdates(
-            request,
-            callback,
-            Looper.getMainLooper()
-        )
-    }
-
-    override fun onPause() {
-        super.onPause()
-
-        if (::client.isInitialized) {
-            client.removeLocationUpdates(callback)
-        }
-    }
-
-    override fun onResume() {
-        super.onResume()
-
-        if (!::client.isInitialized) {
-            return
-        }
-
-        val fineLocationGranted =
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-
-        val coarseLocationGranted =
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-
-        if (fineLocationGranted || coarseLocationGranted) {
-            startGps()
-        }
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
-        if (::web.isInitialized && web.canGoBack()) {
-            web.goBack()
-        } else {
-            super.onBackPressed()
-        }
-    }
-
-    override fun onDestroy() {
-        if (::client.isInitialized) {
-            client.removeLocationUpdates(callback)
-        }
-
-        if (::web.isInitialized) {
-            web.stopLoading()
-            web.destroy()
-        }
-
-        super.onDestroy()
-    }
+class MainActivity:ComponentActivity(){
+ private lateinit var client:FusedLocationProviderClient
+ override fun onCreate(savedInstanceState:Bundle?){super.onCreate(savedInstanceState);MapLibre.getInstance(this);client=LocationServices.getFusedLocationProviderClient(this);setContent{App(client)}}
 }
+data class Place(val name:String,val lat:Double,val lon:Double)
+data class Step(val text:String,val lat:Double,val lon:Double,val distance:Double)
+data class RouteData(val points:List<Point>,val distance:Double,val duration:Double,val steps:List<Step>)
+
+@SuppressLint("MissingPermission") @Composable
+private fun rememberGps(client:FusedLocationProviderClient,granted:Boolean):Location?{
+ var location by remember{mutableStateOf<Location?>(null)}
+ DisposableEffect(granted){if(!granted)return@DisposableEffect onDispose{}
+  val cb=object:LocationCallback(){override fun onLocationResult(r:LocationResult){r.lastLocation?.let{location=it}}}
+  val req=LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY,1000).setMinUpdateIntervalMillis(500).setMinUpdateDistanceMeters(2f).build()
+  client.requestLocationUpdates(req,cb,null);onDispose{client.removeLocationUpdates(cb)}
+ };return location
+}
+
+@Composable private fun rememberSpeaker():Pair<TextToSpeech?,Boolean>{
+ val context=LocalContext.current;var ready by remember{mutableStateOf(false)};var tts by remember{mutableStateOf<TextToSpeech?>(null)}
+ DisposableEffect(Unit){val engine=TextToSpeech(context){status->if(status==TextToSpeech.SUCCESS){tts?.language=Locale.ITALIAN;ready=true}};tts=engine;onDispose{engine.stop();engine.shutdown()}}
+ return tts to ready
+}
+
+@Composable private fun App(client:FusedLocationProviderClient){
+ val context=LocalContext.current;val scope=rememberCoroutineScope();val (tts,ttsReady)=rememberSpeaker()
+ var granted by remember{mutableStateOf(ContextCompat.checkSelfPermission(context,Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED)}
+ val ask=rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()){granted=it};val gps=rememberGps(client,granted)
+ var query by remember{mutableStateOf("")};var place by remember{mutableStateOf<Place?>(null)};var route by remember{mutableStateOf<RouteData?>(null)}
+ var busy by remember{mutableStateOf(false)};var error by remember{mutableStateOf<String?>(null)};var navigating by remember{mutableStateOf(false)};var muted by remember{mutableStateOf(false)}
+ var stepIndex by remember{mutableIntStateOf(0)};var lastSpoken by remember{mutableIntStateOf(-1)};var lastReroute by remember{mutableLongStateOf(0L)}
+ val currentStep=route?.steps?.getOrNull(stepIndex)
+ val distanceToStep=if(gps!=null&&currentStep!=null)distanceMeters(gps.latitude,gps.longitude,currentStep.lat,currentStep.lon) else Double.NaN
+ val speed=((gps?.speed?:0f)*3.6f).roundToInt().coerceAtLeast(0)
+
+ LaunchedEffect(gps,navigating,route){
+  if(!navigating||gps==null||route==null)return@LaunchedEffect
+  val steps=route!!.steps
+  if(stepIndex<steps.lastIndex && distanceToStep<35){stepIndex++}
+  val s=steps.getOrNull(stepIndex)
+  if(s!=null&&stepIndex!=lastSpoken&&distanceMeters(gps.latitude,gps.longitude,s.lat,s.lon)<350){if(!muted&&ttsReady)tts?.speak("Tra ${distanceMeters(gps.latitude,gps.longitude,s.lat,s.lon).roundToInt()} metri, ${s.text}",TextToSpeech.QUEUE_FLUSH,null,"step-$stepIndex");lastSpoken=stepIndex}
+  val offRoute=distanceToPolyline(gps.latitude,gps.longitude,route!!.points)>80
+  if(offRoute&&System.currentTimeMillis()-lastReroute>15000){lastReroute=System.currentTimeMillis();scope.launch{try{route=fetchRoute(gps,place!!);stepIndex=0;lastSpoken=-1;if(!muted&&ttsReady)tts?.speak("Ricalcolo del percorso completato",TextToSpeech.QUEUE_FLUSH,null,"reroute")}catch(_:Exception){}}}
+ }
+
+ MaterialTheme(colorScheme=darkColorScheme(primary=Cyan,background=Navy,surface=Panel)){
+  Box(Modifier.fillMaxSize().background(Navy)){NavMap(gps,place,route,navigating)
+   Column(Modifier.fillMaxSize().padding(12.dp),verticalArrangement=Arrangement.SpaceBetween){
+    Surface(color=Panel,shape=RoundedCornerShape(20.dp)){Row(Modifier.fillMaxWidth().padding(14.dp),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically){Column{Text("STRADASAFE · 0.7",color=Color.White,fontWeight=FontWeight.Bold);Text(if(gps!=null)"GPS ${gps.accuracy.roundToInt()} m" else "In attesa del GPS",color=if(gps!=null)Cyan else Amber,fontSize=12.sp)};if(navigating)IconButton(onClick={muted=!muted}){Text(if(muted)"🔇" else "🔊",fontSize=22.sp)}}}
+    if(navigating&&route!=null){NavigationCard(currentStep,distanceToStep,speed,route!!,onStop={navigating=false;stepIndex=0;tts?.stop()})}
+    else SearchCard(query,{query=it},granted,{ask.launch(Manifest.permission.ACCESS_FINE_LOCATION)},busy,error,route,place,
+      onSearch={scope.launch{busy=true;error=null;try{val p=searchPlace(query);place=p;val l=gps?:error("Attendi il segnale GPS");route=fetchRoute(l,p)}catch(e:Exception){error=e.message?:"Errore"}finally{busy=false}}},
+      onStart={navigating=true;stepIndex=0;lastSpoken=-1},onReset={route=null;place=null})
+   }
+  }
+ }
+}
+
+@Composable private fun SearchCard(query:String,onQuery:(String)->Unit,granted:Boolean,onGps:()->Unit,busy:Boolean,error:String?,route:RouteData?,place:Place?,onSearch:()->Unit,onStart:()->Unit,onReset:()->Unit){
+ Surface(color=Panel,shape=RoundedCornerShape(24.dp)){Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){
+  if(route==null){Text("Dove vuoi andare?",color=Color.White,fontSize=21.sp,fontWeight=FontWeight.Bold);OutlinedTextField(query,onQuery,Modifier.fillMaxWidth(),singleLine=true,placeholder={Text("Indirizzo o luogo in Liguria")});if(!granted)Button(onClick=onGps,modifier=Modifier.fillMaxWidth()){Text("ATTIVA GPS")};Button(onClick=onSearch,enabled=query.length>2&&granted&&!busy,modifier=Modifier.fillMaxWidth()){Text(if(busy)"CALCOLO..." else "CALCOLA PERCORSO")}}
+  else{Text(place?.name?:"Destinazione",color=Color.White,maxLines=2);Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){Text("%.1f km".format(route.distance/1000),color=Cyan);Text("${(route.duration/60).roundToInt()} min",color=Cyan)};Button(onClick=onStart,Modifier.fillMaxWidth()){Text("AVVIA NAVIGAZIONE")};OutlinedButton(onClick=onReset,Modifier.fillMaxWidth()){Text("CAMBIA DESTINAZIONE")}}
+  error?.let{Text(it,color=Color(0xFFFF6B6B),fontSize=12.sp)};Text("Navigazione sperimentale online · osserva sempre la segnaletica",color=Amber,fontSize=10.sp)
+ }}
+}
+
+@Composable private fun NavigationCard(step:Step?,distance:Double,speed:Int,route:RouteData,onStop:()->Unit){
+ Surface(color=Panel,shape=RoundedCornerShape(24.dp)){Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){
+  Row(verticalAlignment=Alignment.CenterVertically){Surface(shape=CircleShape,color=Cyan,modifier=Modifier.size(58.dp)){Box(contentAlignment=Alignment.Center){Text("↱",fontSize=32.sp,color=Navy)}};Spacer(Modifier.width(12.dp));Column{Text(if(distance.isNaN())"..." else "Tra ${distance.roundToInt()} m",color=Cyan,fontWeight=FontWeight.Bold);Text(step?.text?:"Segui il percorso",color=Color.White,fontSize=19.sp,maxLines=2)}}
+  HorizontalDivider(color=Color(0x334DD8F5));Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){Metric("$speed","km/h");Metric("%.1f".format(route.distance/1000),"km totali");Metric("${(route.duration/60).roundToInt()}","min")};OutlinedButton(onClick=onStop,Modifier.fillMaxWidth()){Text("TERMINA NAVIGAZIONE")}
+ }}
+}
+@Composable private fun Metric(a:String,b:String)=Column(horizontalAlignment=Alignment.CenterHorizontally){Text(a,color=Color.White,fontSize=19.sp,fontWeight=FontWeight.Bold);Text(b,color=Color.LightGray,fontSize=11.sp)}
+
+@Composable private fun NavMap(location:Location?,place:Place?,route:RouteData?,follow:Boolean){
+ val context=LocalContext.current;val mapView=remember{MapView(context)};var ready by remember{mutableStateOf(false)};var fitted by remember{mutableStateOf(false)}
+ AndroidView(factory={mapView.apply{onCreate(null);getMapAsync{map->map.cameraPosition=CameraPosition.Builder().target(LatLng(44.3,8.8)).zoom(8.3).build();map.setStyle(Style.Builder().fromUri(STYLE_URL)){s->s.addSource(GeoJsonSource("gps"));s.addLayer(CircleLayer("gps-l","gps").withProperties(circleRadius(9f),circleColor("#39D5FF"),circleStrokeColor("#FFFFFF"),circleStrokeWidth(3f)));s.addSource(GeoJsonSource("dest"));s.addLayer(CircleLayer("dest-l","dest").withProperties(circleRadius(8f),circleColor("#FFC857")));s.addSource(GeoJsonSource("route"));s.addLayer(LineLayer("route-l","route").withProperties(lineColor("#39D5FF"),lineWidth(7f)));ready=true}}}},update={v->if(ready)v.getMapAsync{m->location?.let{m.style?.getSourceAs<GeoJsonSource>("gps")?.setGeoJson(Feature.fromGeometry(Point.fromLngLat(it.longitude,it.latitude)))};place?.let{m.style?.getSourceAs<GeoJsonSource>("dest")?.setGeoJson(Feature.fromGeometry(Point.fromLngLat(it.lon,it.lat)))};route?.let{r->m.style?.getSourceAs<GeoJsonSource>("route")?.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(r.points)));if(!follow&&!fitted){val b=LatLngBounds.Builder();r.points.forEach{b.include(LatLng(it.latitude(),it.longitude()))};m.animateCamera(CameraUpdateFactory.newLatLngBounds(b.build(),100),800);fitted=true}};if(follow&&location!=null)m.cameraPosition=CameraPosition.Builder().target(LatLng(location.latitude,location.longitude)).zoom(17.0).bearing(if(location.hasBearing())location.bearing.toDouble() else 0.0).tilt(50.0).build()}},modifier=Modifier.fillMaxSize());DisposableEffect(mapView){mapView.onStart();mapView.onResume();onDispose{mapView.onPause();mapView.onStop();mapView.onDestroy()}}
+}
+
+private suspend fun searchPlace(q:String):Place=withContext(Dispatchers.IO){val e=URLEncoder.encode("$q, Liguria, Italia","UTF-8");val a=JSONArray(get("$SEARCH_BASE/search?q=$e&format=jsonv2&limit=1&countrycodes=it&viewbox=7.45,44.75,10.10,43.70&bounded=1"));if(a.length()==0)error("Destinazione non trovata");val o=a.getJSONObject(0);Place(o.getString("display_name"),o.getString("lat").toDouble(),o.getString("lon").toDouble())}
+private suspend fun fetchRoute(l:Location,p:Place):RouteData=withContext(Dispatchers.IO){val root=JSONObject(get("$ROUTE_BASE/route/v1/driving/${l.longitude},${l.latitude};${p.lon},${p.lat}?overview=full&geometries=geojson&steps=true"));if(root.optString("code")!="Ok")error("Percorso non disponibile");val r=root.getJSONArray("routes").getJSONObject(0);val c=r.getJSONObject("geometry").getJSONArray("coordinates");val pts=(0 until c.length()).map{val a=c.getJSONArray(it);Point.fromLngLat(a.getDouble(0),a.getDouble(1))};val steps=mutableListOf<Step>();val legs=r.getJSONArray("legs");for(i in 0 until legs.length()){val ss=legs.getJSONObject(i).getJSONArray("steps");for(j in 0 until ss.length()){val s=ss.getJSONObject(j);val man=s.getJSONObject("maneuver");val loc=man.getJSONArray("location");steps+=Step(instruction(man.optString("type"),man.optString("modifier"),s.optString("name")),loc.getDouble(1),loc.getDouble(0),s.optDouble("distance"))}};RouteData(pts,r.getDouble("distance"),r.getDouble("duration"),steps)}
+private fun instruction(type:String,mod:String,name:String):String{val road=if(name.isBlank())"" else " in $name";return when(type){"depart"->"Parti e prosegui$road";"arrive"->"Sei arrivato a destinazione";"roundabout","rotary"->"Entra nella rotatoria$road";"turn"->when(mod){"left"->"Svolta a sinistra$road";"right"->"Svolta a destra$road";"slight left"->"Tieni leggermente la sinistra$road";"slight right"->"Tieni leggermente la destra$road";"uturn"->"Fai inversione$road";else->"Prosegui$road"};else->"Prosegui$road"}}
+private fun get(address:String):String{val c=(URL(address).openConnection() as HttpURLConnection).apply{connectTimeout=15000;readTimeout=20000;requestMethod="GET";setRequestProperty("User-Agent","StradaSafeLiguria/0.7 private prototype");setRequestProperty("Accept-Language","it")};try{if(c.responseCode !in 200..299)error("Servizio non disponibile (${c.responseCode})");return c.inputStream.bufferedReader().use{it.readText()}}finally{c.disconnect()}}
+private fun distanceMeters(a:Double,b:Double,c:Double,d:Double):Double{val r=6371000.0;val p1=Math.toRadians(a);val p2=Math.toRadians(c);val dp=Math.toRadians(c-a);val dl=Math.toRadians(d-b);val x=sin(dp/2).pow(2)+cos(p1)*cos(p2)*sin(dl/2).pow(2);return 2*r*atan2(sqrt(x),sqrt(1-x))}
+private fun distanceToPolyline(lat:Double,lon:Double,pts:List<Point>):Double=pts.minOfOrNull{distanceMeters(lat,lon,it.latitude(),it.longitude())}?:Double.MAX_VALUE
