@@ -53,10 +53,15 @@ import java.net.URL
 import java.util.Locale
 import kotlin.math.*
 
-private val Navy = Color(0xFF07131D)
-private val Panel = Color(0xEE102635)
-private val Cyan = Color(0xFF39D5FF)
-private val Amber = Color(0xFFFFC857)
+// Palette ispirata a Waze (sfondi scuri profondi, accenti ad alto contrasto) e Apple Mappe (pulizia visiva)
+private val DarkBackground = Color(0xFF0B131D)
+private val CardSurface = Color(0xEE142232)
+private val AppleBlue = Color(0xFF0A84FF)
+private val WazeCyan = Color(0xFF00D2FF)
+private val WazeGreen = Color(0xFF32D74B)
+private val AlertAmber = Color(0xFFFF9F0A)
+private val TextWhite = Color(0xFFFFFFFF)
+private val TextGray = Color(0xFF8E8E93)
 
 private const val STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
 private const val SEARCH_BASE = "https://nominatim.openstreetmap.org"
@@ -74,7 +79,7 @@ class MainActivity : ComponentActivity() {
 }
 
 data class Place(val name: String, val lat: Double, val lon: Double)
-data class Step(val text: String, val lat: Double, val lon: Double, val distance: Double)
+data class Step(val text: String, val lat: Double, val lon: Double, val distance: Double, val maneuver: String)
 data class RouteData(val points: List<Point>, val distance: Double, val duration: Double, val steps: List<Step>)
 
 @SuppressLint("MissingPermission")
@@ -105,29 +110,19 @@ private fun rememberSpeaker(): Pair<TextToSpeech?, Boolean> {
     var tts by remember { mutableStateOf<TextToSpeech?>(null) }
 
     DisposableEffect(Unit) {
-        val engine = TextToSpeech(context) { status ->
+        var engine: TextToSpeech? = null
+        engine = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
+                engine?.language = Locale.ITALIAN
                 ready = true
             }
         }
         tts = engine
         onDispose {
-            engine.stop()
-            engine.shutdown()
+            engine?.stop()
+            engine?.shutdown()
         }
     }
-
-    LaunchedEffect(ready) {
-        if (ready) {
-            val result = tts?.setLanguage(Locale.ITALIAN)
-            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                android.widget.Toast.makeText(context, "Errore Audio: Scarica la voce Italiana nelle impostazioni del telefono!", android.widget.Toast.LENGTH_LONG).show()
-            } else {
-                android.widget.Toast.makeText(context, "Audio Android connesso e pronto", android.widget.Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
     return tts to ready
 }
 
@@ -174,12 +169,12 @@ private fun App(client: FusedLocationProviderClient) {
         if (!navigating || gps == null || route == null) return@LaunchedEffect
         val steps = route!!.steps
 
-        if (stepIndex < steps.lastIndex && distanceToStep < 35) {
+        if (stepIndex < steps.lastIndex && distanceToStep < 30) {
             stepIndex++
         }
 
         val s = steps.getOrNull(stepIndex)
-        if (s != null && stepIndex != lastSpoken && distanceMeters(gps.latitude, gps.longitude, s.lat, s.lon) < 350) {
+        if (s != null && stepIndex != lastSpoken && distanceMeters(gps.latitude, gps.longitude, s.lat, s.lon) < 300) {
             if (!muted && ttsReady) {
                 tts?.speak(
                     "Tra ${distanceMeters(gps.latitude, gps.longitude, s.lat, s.lon).roundToInt()} metri, ${s.text}",
@@ -191,7 +186,7 @@ private fun App(client: FusedLocationProviderClient) {
             lastSpoken = stepIndex
         }
 
-        val offRoute = distanceToPolyline(gps.latitude, gps.longitude, route!!.points) > 80
+        val offRoute = distanceToPolyline(gps.latitude, gps.longitude, route!!.points) > 75
         if (offRoute && System.currentTimeMillis() - lastReroute > 15000) {
             lastReroute = System.currentTimeMillis()
             scope.launch {
@@ -200,56 +195,52 @@ private fun App(client: FusedLocationProviderClient) {
                     stepIndex = 0
                     lastSpoken = -1
                     if (!muted && ttsReady) {
-                        tts?.speak("Ricalcolo del percorso completato", TextToSpeech.QUEUE_FLUSH, null, "reroute")
+                        tts?.speak("Ricalcolo del percorso in corso", TextToSpeech.QUEUE_FLUSH, null, "reroute")
                     }
                 } catch (_: Exception) {}
             }
         }
     }
 
-    MaterialTheme(colorScheme = darkColorScheme(primary = Cyan, background = Navy, surface = Panel)) {
-        Box(Modifier.fillMaxSize().background(Navy)) {
+    MaterialTheme(colorScheme = darkColorScheme(primary = AppleBlue, background = DarkBackground, surface = CardSurface)) {
+        Box(Modifier.fillMaxSize().background(DarkBackground)) {
             NavMap(gps, place, route, navigating)
 
             Column(
-                Modifier.fillMaxSize().padding(12.dp),
+                Modifier.fillMaxSize().padding(10.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                Surface(color = Panel, shape = RectangleShape) {
+                // Barra Superiore Stile Apple Mappe / Waze
+                Surface(color = CardSurface, shape = RectangleShape) {
                     Row(
-                        Modifier.fillMaxWidth().padding(14.dp),
+                        Modifier.fillMaxWidth().padding(12.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
-                            Text("STRADASAFE · 0.7", color = Color.White, fontWeight = FontWeight.Bold)
+                            Text("STRADASAFE · 0.8", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             Text(
-                                if (gps != null) "GPS ${gps.accuracy.roundToInt()} m" else "In attesa del GPS",
-                                color = if (gps != null) Cyan else Amber,
-                                fontSize = 12.sp
+                                if (gps != null) "GPS attivo (${gps.accuracy.roundToInt()}m)" else "Ricerca segnale GPS...",
+                                color = if (gps != null) WazeGreen else AlertAmber,
+                                fontSize = 11.sp
                             )
                         }
 
                         if (navigating) {
                             IconButton(onClick = { muted = !muted }) {
-                                Text(if (muted) "🔇" else "🔊", fontSize = 22.sp)
+                                Text(if (muted) "🔇" else "🔊", fontSize = 20.sp)
                             }
                         }
                     }
                 }
 
+                // Pannello Inferiore di Navigazione o Ricerca
                 if (navigating && route != null) {
-                    NavigationCard(
-                        currentStep,
-                        distanceToStep,
-                        speed,
-                        route!!,
-                        onStop = {
-                            navigating = false
-                            stepIndex = 0
-                            tts?.stop()
-                        }
-                    )
+                    AppleWazeNavigationCard(currentStep, distanceToStep, speed, route!!, onStop = {
+                        navigating = false
+                        stepIndex = 0
+                        tts?.stop()
+                    })
                 } else {
                     SearchCard(
                         query,
@@ -284,7 +275,7 @@ private fun App(client: FusedLocationProviderClient) {
                                     val l = gps ?: error("Attendi il segnale GPS")
                                     route = fetchRoute(l, p)
                                 } catch (e: Exception) {
-                                    error = e.message ?: "Errore durante il percorso"
+                                    error = e.message ?: "Errore calcolo percorso"
                                 } finally {
                                     busy = false
                                 }
@@ -326,26 +317,22 @@ private fun SearchCard(
     onStart: () -> Unit,
     onReset: () -> Unit
 ) {
-    Surface(color = Panel, shape = RectangleShape) {
+    Surface(color = CardSurface, shape = RectangleShape) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (route == null) {
-                Text("Dove vuoi andare?", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                Text("Dove andiamo?", color = TextWhite, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 OutlinedTextField(
                     value = query,
                     onValueChange = onQuery,
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    placeholder = { Text("Es. Piazza De Ferrari, Genova") },
+                    placeholder = { Text("Indirizzo o luogo in Liguria", color = TextGray) },
                     shape = RectangleShape
                 )
 
                 if (!granted) {
-                    Button(
-                        onClick = onGps,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RectangleShape
-                    ) {
-                        Text("ATTIVA GPS")
+                    Button(onClick = onGps, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue)) {
+                        Text("ATTIVA PERMESSO GPS", color = TextWhite)
                     }
                 }
 
@@ -353,9 +340,10 @@ private fun SearchCard(
                     onClick = onSearch,
                     enabled = query.length > 2 && granted && !busy,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RectangleShape
+                    shape = RectangleShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = AppleBlue)
                 ) {
-                    Text(if (busy) "RICERCA..." else "CERCA DESTINAZIONE")
+                    Text(if (busy) "CERCANDO..." else "CERCA", color = TextWhite, fontWeight = FontWeight.Bold)
                 }
 
                 if (results.isNotEmpty()) {
@@ -366,109 +354,96 @@ private fun SearchCard(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RectangleShape
                             ) {
-                                Text(res.name, color = Color.White, maxLines = 2)
+                                Text(res.name, color = TextWhite, maxLines = 2, fontSize = 13.sp)
                             }
-                            HorizontalDivider(color = Color.DarkGray)
+                            HorizontalDivider(color = Color(0x33FFFFFF))
                         }
                     }
                 }
             } else {
-                Text(place?.name ?: "Destinazione", color = Color.White, maxLines = 2)
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("%.1f km".format(route.distance / 1000), color = Cyan)
-                    Text("${(route.duration / 60).roundToInt()} min", color = Cyan)
+                Text(place?.name ?: "Destinazione", color = TextWhite, fontWeight = FontWeight.Bold, maxLines = 2)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Distanza: %.1f km".format(route.distance / 1000), color = WazeCyan, fontWeight = FontWeight.Bold)
+                    Text("Tempo: ${(route.duration / 60).roundToInt()} min", color = WazeGreen, fontWeight = FontWeight.Bold)
                 }
 
-                Button(
-                    onClick = onStart,
-                    Modifier.fillMaxWidth(),
-                    shape = RectangleShape
-                ) {
-                    Text("AVVIA NAVIGAZIONE")
+                Button(onClick = onStart, Modifier.fillMaxWidth(), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = WazeGreen)) {
+                    Text("AVVIA GUIDA", color = DarkBackground, fontWeight = FontWeight.Bold)
                 }
 
-                OutlinedButton(
-                    onClick = onReset,
-                    Modifier.fillMaxWidth(),
-                    shape = RectangleShape
-                ) {
-                    Text("CAMBIA DESTINAZIONE")
+                OutlinedButton(onClick = onReset, Modifier.fillMaxWidth(), shape = RectangleShape) {
+                    Text("ANNULLA", color = TextWhite)
                 }
             }
 
-            error?.let {
-                Text(it, color = Color(0xFFFF6B6B), fontSize = 12.sp)
-            }
-
-            Text(
-                "Navigazione online v0.7 · osserva la segnaletica",
-                color = Amber,
-                fontSize = 10.sp
-            )
+            error?.let { Text(it, color = AlertAmber, fontSize = 12.sp) }
+            Text("StradaSafe 0.8 · Grafica ibrida Waze & Apple", color = TextGray, fontSize = 10.sp)
         }
     }
 }
 
 @Composable
-private fun NavigationCard(
-    step: Step?,
-    distance: Double,
-    speed: Int,
-    route: RouteData,
-    onStop: () -> Unit
-) {
-    Surface(color = Panel, shape = RectangleShape) {
+private fun AppleWazeNavigationCard(step: Step?, distance: Double, speed: Int, route: RouteData, onStop: () -> Unit) {
+    Surface(color = CardSurface, shape = RectangleShape) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    shape = RectangleShape,
-                    color = Cyan,
-                    modifier = Modifier.size(58.dp)
-                ) {
+            // Blocco Manovra Principale (Stile Apple/Waze)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.background(Color(0x33000000)).padding(10.dp)) {
+                Surface(shape = RectangleShape, color = AppleBlue, modifier = Modifier.size(64.dp)) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text("↱", fontSize = 32.sp, color = Navy)
+                        Text(getManifoldSymbol(step?.maneuver), fontSize = 34.sp, color = TextWhite)
                     }
                 }
-                Spacer(Modifier.width(12.dp))
-                Column {
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
                     Text(
-                        if (distance.isNaN()) "..." else "Tra ${distance.roundToInt()} m",
-                        color = Cyan,
+                        if (distance.isNaN()) "..." else "${distance.roundToInt()} m",
+                        color = WazeCyan,
+                        fontSize = 26.sp,
                         fontWeight = FontWeight.Bold
                     )
-                    Text(step?.text ?: "Segui il percorso", color = Color.White, fontSize = 19.sp, maxLines = 2)
+                    Text(
+                        step?.text ?: "Prosegui dritto",
+                        color = TextWhite,
+                        fontSize = 15.sp,
+                        maxLines = 2,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
 
-            HorizontalDivider(color = Color(0x334DD8F5))
+            HorizontalDivider(color = Color(0x33FFFFFF))
 
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Metric("$speed", "km/h")
-                Metric("%.1f".format(route.distance / 1000), "km totali")
-                Metric("${(route.duration / 60).roundToInt()}", "min")
+            // Cruscotto inferiore in tempo reale (Waze style)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                MetricDashboard("$speed", "KM/H", if (speed > 130) AlertAmber else WazeCyan)
+                MetricDashboard("%.1f".format(route.distance / 1000), "KM", TextWhite)
+                MetricDashboard("${(route.duration / 60).roundToInt()}", "MIN", WazeGreen)
             }
 
             OutlinedButton(
                 onClick = onStop,
-                Modifier.fillMaxWidth(),
-                shape = RectangleShape
+                modifier = Modifier.fillMaxWidth(),
+                shape = RectangleShape,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = AlertAmber)
             ) {
-                Text("TERMINA NAVIGAZIONE")
+                Text("TERMINA VIAGGIO", fontWeight = FontWeight.Bold)
             }
         }
     }
 }
 
 @Composable
-private fun Metric(a: String, b: String) = Column(horizontalAlignment = Alignment.CenterHorizontally) {
-    Text(a, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
-    Text(b, color = Color(0xFFB5C7D6), fontSize = 12.sp)
+private fun MetricDashboard(value: String, unit: String, color: Color) = Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    Text(value, color = color, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+    Text(unit, color = TextGray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+}
+
+private fun getManifoldSymbol(maneuver: String?): String = when (maneuver) {
+    "left", "slight left" -> "↰"
+    "right", "slight right" -> "↱"
+    "uturn" -> "⮌"
+    "roundabout" -> "⟳"
+    else -> "↑"
 }
 
 @Composable
@@ -493,8 +468,8 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, follow
                         s.addLayer(
                             CircleLayer("gps-l", "gps")
                                 .withProperties(
-                                    circleRadius(9f),
-                                    circleColor("#39D5FF"),
+                                    circleRadius(10f),
+                                    circleColor("#0A84FF"),
                                     circleStrokeColor("#FFFFFF"),
                                     circleStrokeWidth(3f)
                                 )
@@ -504,8 +479,8 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, follow
                         s.addLayer(
                             CircleLayer("dest-l", "dest")
                                 .withProperties(
-                                    circleRadius(8f),
-                                    circleColor("#FFC857")
+                                    circleRadius(9f),
+                                    circleColor("#32D74B")
                                 )
                         )
 
@@ -513,8 +488,8 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, follow
                         s.addLayer(
                             LineLayer("route-l", "route")
                                 .withProperties(
-                                    lineColor("#39D5FF"),
-                                    lineWidth(7f)
+                                    lineColor("#00D2FF"),
+                                    lineWidth(8f)
                                 )
                         )
 
@@ -550,9 +525,9 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, follow
                 if (follow && location != null) {
                     m.cameraPosition = CameraPosition.Builder()
                         .target(LatLng(location.latitude, location.longitude))
-                        .zoom(17.0)
+                        .zoom(17.5)
                         .bearing(if (location.hasBearing()) location.bearing.toDouble() else 0.0)
-                        .tilt(50.0)
+                        .tilt(55.0)
                         .build()
                 }
             }
@@ -575,7 +550,7 @@ private suspend fun searchPlaces(q: String): List<Place> = withContext(Dispatche
     val e = URLEncoder.encode(q, "UTF-8")
     val res = get("$SEARCH_BASE/search?q=$e&format=jsonv2&limit=5&countrycodes=it&viewbox=7.45,44.75,10.10,43.70&bounded=1")
     val a = JSONArray(res)
-    if (a.length() == 0) error("Nessun risultato trovato.")
+    if (a.length() == 0) error("Nessun risultato trovato in Liguria.")
 
     val list = mutableListOf<Place>()
     for (i in 0 until a.length()) {
@@ -610,10 +585,11 @@ private suspend fun fetchRoute(l: Location, p: Place): RouteData = withContext(D
             val man = s.getJSONObject("maneuver")
             val loc = man.getJSONArray("location")
             steps += Step(
-                instruction(man.optString("type"), man.optString("modifier"), s.optString("name")),
-                loc.getDouble(1),
-                loc.getDouble(0),
-                s.optDouble("distance")
+                text = instruction(man.optString("type"), man.optString("modifier"), s.optString("name")),
+                lat = loc.getDouble(1),
+                lon = loc.getDouble(0),
+                distance = s.optDouble("distance"),
+                maneuver = man.optString("modifier")
             )
         }
     }
@@ -630,8 +606,8 @@ private fun instruction(type: String, mod: String, name: String): String {
         "turn" -> when (mod) {
             "left" -> "Svolta a sinistra$road"
             "right" -> "Svolta a destra$road"
-            "slight left" -> "Tieni leggermente la sinistra$road"
-            "slight right" -> "Tieni leggermente la destra$road"
+            "slight left" -> "Tieni la sinistra$road"
+            "slight right" -> "Tieni la destra$road"
             "straight" -> "Continua dritto$road"
             "uturn" -> "Fai inversione a U$road"
             else -> "Prosegui$road"
@@ -645,7 +621,7 @@ private fun get(address: String): String {
         connectTimeout = 15000
         readTimeout = 20000
         requestMethod = "GET"
-        setRequestProperty("User-Agent", "StradaSafeLiguria/0.7 private prototype")
+        setRequestProperty("User-Agent", "StradaSafeLiguria/0.8 private prototype")
         setRequestProperty("Accept-Language", "it")
     }
 
