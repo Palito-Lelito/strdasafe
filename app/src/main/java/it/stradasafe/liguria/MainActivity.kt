@@ -105,19 +105,29 @@ private fun rememberSpeaker(): Pair<TextToSpeech?, Boolean> {
     var tts by remember { mutableStateOf<TextToSpeech?>(null) }
 
     DisposableEffect(Unit) {
-        var engine: TextToSpeech? = null
-        engine = TextToSpeech(context) { status ->
+        val engine = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                engine?.language = Locale.ITALIAN
                 ready = true
             }
         }
         tts = engine
         onDispose {
-            engine?.stop()
-            engine?.shutdown()
+            engine.stop()
+            engine.shutdown()
         }
     }
+
+    LaunchedEffect(ready) {
+        if (ready) {
+            val result = tts?.setLanguage(Locale.ITALIAN)
+            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                android.widget.Toast.makeText(context, "Errore Audio: Scarica la voce Italiana nelle impostazioni del telefono!", android.widget.Toast.LENGTH_LONG).show()
+            } else {
+                android.widget.Toast.makeText(context, "Audio Android connesso e pronto", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     return tts to ready
 }
 
