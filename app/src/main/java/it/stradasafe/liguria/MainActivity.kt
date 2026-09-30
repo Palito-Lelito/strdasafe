@@ -87,13 +87,18 @@ object AppState {
     val isSearchExpanded = mutableStateOf(false)
     val stepIndex = mutableIntStateOf(0)
     
-    // Safety Devices (Autovelox, Pericoli)
+    // Safety Devices
     val safetyDevices = mutableStateOf<List<SafetyDevice>>(emptyList())
     val alertedDevices = mutableSetOf<SafetyDevice>()
     
-    // Limiti di velocità (Live Overpass API)
+    // Limiti di velocità
     val speedLimit = mutableStateOf<Int?>(null)
     val lastSpeedLimitCheck = mutableLongStateOf(0L)
+
+    // Modalità Tutor (Velocità Media)
+    val inTutorZone = mutableStateOf(false)
+    val tutorStartTime = mutableLongStateOf(0L)
+    val tutorStartDistanceRemaining = mutableDoubleStateOf(0.0)
 }
 
 class MainActivity : ComponentActivity() {
@@ -189,6 +194,7 @@ private fun App(client: FusedLocationProviderClient) {
     var muted by remember { mutableStateOf(false) }
     var lastSpoken by remember { mutableIntStateOf(-1) }
     var lastReroute by remember { mutableLongStateOf(0L) }
+    var avgTutorSpeed by remember { mutableIntStateOf(0) }
 
     val currentStep = route?.steps?.getOrNull(stepIndex)
     val distanceToStep = if (gps != null && currentStep != null) distanceMeters(gps.latitude, gps.longitude, currentStep.lat, currentStep.lon) else Double.NaN
@@ -199,10 +205,9 @@ private fun App(client: FusedLocationProviderClient) {
 
     LaunchedEffect(gps, navigating, route) {
         if (!navigating || gps == null || route == null) return@LaunchedEffect
-        
-        // --- 1. Motore Overpass API Limiti di Velocità (V0.91) ---
-        // Controlla il limite ogni 20 secondi per non saturare l'API gratuita
         val currentTime = System.currentTimeMillis()
+
+        // --- 1. Overpass API Limiti di Velocità ---
         if (currentTime - AppState.lastSpeedLimitCheck.longValue > 20000) {
             AppState.lastSpeedLimitCheck.longValue = currentTime
             scope.launch {
@@ -211,7 +216,7 @@ private fun App(client: FusedLocationProviderClient) {
             }
         }
 
-        // --- 2. Logica Manovre TTS ---
+        // --- 2. Manovre TTS ---
         val steps = route!!.steps
         if (stepIndex < steps.lastIndex && distanceToStep < 30) stepIndex++
 
@@ -221,13 +226,40 @@ private fun App(client: FusedLocationProviderClient) {
             lastSpoken = stepIndex
         }
 
-        // --- 3. Logica Alert Autovelox & Pericoli ---
+        // --- 3. Safety Devices & Logica TUTOR ---
         val unalerted = AppState.safetyDevices.value.filter { it !in AppState.alertedDevices }
         val nearbyDevice = unalerted.firstOrNull { distanceMeters(gps.latitude, gps.longitude, it.lat, it.lon) < 500 }
         
         if (nearbyDevice != null) {
             AppState.alertedDevices.add(nearbyDevice)
-            if (!muted && ttsReady) tts?.speak("Attenzione, ${nearbyDevice.type} a 500 metri", TextToSpeech.QUEUE_ADD, null, "safety_${nearbyDevice.hashCode()}")
+            val isTutor = nearbyDevice.type.lowercase().contains("tutor")
+
+            if (isTutor) {
+                if (!AppState.inTutorZone.value) {
+                    AppState.inTutorZone.value = true
+                    AppState.tutorStartTime.longValue = currentTime
+                    AppState.tutorStartDistanceRemaining.doubleValue = remainingDistance
+                    if (!muted && ttsReady) tts?.speak("Inizio misurazione Tutor", TextToSpeech.QUEUE_ADD, null, "tutor_start")
+                } else {
+                    AppState.inTutorZone.value = false
+                    if (!muted && ttsReady) tts?.speak("Fine zona Tutor", TextToSpeech.QUEUE_ADD, null, "tutor_end")
+                }
+            } else {
+                if (!muted && ttsReady) tts?.speak("Attenzione, ${nearbyDevice.type} a 500 metri", TextToSpeech.QUEUE_ADD, null, "safety_${nearbyDevice.hashCode()}")
+            }
+        }
+
+        // Calcolo velocità media live se nel tutor
+        if (AppState.inTutorZone.value) {
+            val distTraveledMeters = AppState.tutorStartDistanceRemaining.doubleValue - remainingDistance
+            val timeElapsedMillis = currentTime - AppState.tutorStartTime.longValue
+            
+            // Buffer iniziale di sicurezza per evitare velocità infinite (5 sec, 50 metri)
+            if (timeElapsedMillis > 5000 && distTraveledMeters > 50) {
+                val timeHours = timeElapsedMillis / 3600000.0
+                val distKm = distTraveledMeters / 1000.0
+                avgTutorSpeed = (distKm / timeHours).roundToInt().coerceAtLeast(0)
+            }
         }
 
         // --- 4. Ricalcolo Percorso ---
@@ -254,7 +286,7 @@ private fun App(client: FusedLocationProviderClient) {
                         TopStatusBar(gps, navigating, muted, onMuteToggle = { muted = !muted })
                         if (navigating && route != null) {
                             ManeuverCard(currentStep, distanceToStep)
-                            EtaCard(speed, speedLimit, remainingDistance, remainingDuration, onStop = { navigating = false; stepIndex = 0; tts?.stop(); AppState.alertedDevices.clear(); speedLimit = null })
+                            EtaCard(speed, speedLimit, AppState.inTutorZone.value, avgTutorSpeed, remainingDistance, remainingDuration, onStop = { resetNavigation() })
                         } else if (route != null) {
                             OverviewCard(route!!, place, onStart = { navigating = true; isSearchExpanded = false }, onReset = { route = null; place = null })
                         } else if (isSearchExpanded) {
@@ -276,7 +308,7 @@ private fun App(client: FusedLocationProviderClient) {
                         }
                         Column {
                             if (navigating && route != null) {
-                                EtaCard(speed, speedLimit, remainingDistance, remainingDuration, onStop = { navigating = false; stepIndex = 0; tts?.stop(); AppState.alertedDevices.clear(); speedLimit = null })
+                                EtaCard(speed, speedLimit, AppState.inTutorZone.value, avgTutorSpeed, remainingDistance, remainingDuration, onStop = { resetNavigation() })
                             } else if (route != null) {
                                 OverviewCard(route!!, place, onStart = { navigating = true; isSearchExpanded = false }, onReset = { route = null; place = null })
                             } else if (isSearchExpanded) {
@@ -296,24 +328,28 @@ private fun App(client: FusedLocationProviderClient) {
     }
 }
 
-// --- LOGICA OVERPASS API (Limiti di Velocità in Tempo Reale) ---
+private fun resetNavigation() {
+    AppState.navigating.value = false
+    AppState.stepIndex.intValue = 0
+    AppState.alertedDevices.clear()
+    AppState.speedLimit.value = null
+    AppState.inTutorZone.value = false
+}
+
+// --- LOGICA OVERPASS API ---
 private suspend fun fetchSpeedLimit(lat: Double, lon: Double): Int? = withContext(Dispatchers.IO) {
     try {
-        // Query circolare a 20 metri dalla posizione GPS attuale
         val query = "[out:json][timeout:3];way(around:20,$lat,$lon)[\"maxspeed\"];out tags;"
         val e = URLEncoder.encode(query, "UTF-8")
         val c = (URL("https://overpass-api.de/api/interpreter?data=$e").openConnection() as HttpURLConnection).apply {
-            connectTimeout = 3000
-            readTimeout = 3000
-            requestMethod = "GET"
-            setRequestProperty("User-Agent", "StradaSafeLiguria/0.91")
+            connectTimeout = 3000; readTimeout = 3000; requestMethod = "GET"
+            setRequestProperty("User-Agent", "StradaSafeLiguria/0.92")
         }
         val res = c.inputStream.bufferedReader().use { it.readText() }
         val els = JSONObject(res).optJSONArray("elements") ?: return@withContext null
         
         for (i in 0 until els.length()) {
-            val tags = els.getJSONObject(i).optJSONObject("tags")
-            val ms = tags?.optString("maxspeed")
+            val ms = els.getJSONObject(i).optJSONObject("tags")?.optString("maxspeed")
             if (!ms.isNullOrEmpty()) {
                 return@withContext when (ms) {
                     "IT:urban" -> 50
@@ -370,7 +406,7 @@ private fun TopStatusBar(gps: Location?, navigating: Boolean, muted: Boolean, on
     Surface(color = CardSurface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(8.dp, RectangleShape)) {
         Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column {
-                Text("STRADASAFE 0.91", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text("STRADASAFE 0.92", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Text(
                     if (gps != null) "GPS Attivo (${gps.accuracy.roundToInt()}m)" else "Ricerca segnale GPS...",
                     color = if (gps != null) WazeGreen else AlertAmber,
@@ -459,12 +495,14 @@ private fun ManeuverCard(step: Step?, distanceToStep: Double) {
 }
 
 @Composable
-private fun EtaCard(speed: Int, speedLimit: Int?, remainingDistance: Double, remainingDuration: Double, onStop: () -> Unit) {
+private fun EtaCard(
+    speed: Int, speedLimit: Int?, inTutorZone: Boolean, avgTutorSpeed: Int, 
+    remainingDistance: Double, remainingDuration: Double, onStop: () -> Unit
+) {
     val etaMillis = System.currentTimeMillis() + (remainingDuration * 1000).toLong()
     val etaFormat = java.text.SimpleDateFormat("HH:mm", Locale.getDefault())
     val etaString = if (remainingDuration > 0) etaFormat.format(java.util.Date(etaMillis)) else "--:--"
 
-    // Se si supera il limite, il testo della velocità diventa rosso
     val isSpeeding = speedLimit != null && speed > speedLimit
     val speedColor = if (isSpeeding) AlertRed else TextWhite
 
@@ -472,19 +510,21 @@ private fun EtaCard(speed: Int, speedLimit: Int?, remainingDistance: Double, rem
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 
-                // Modulo Velocità + Cartello del Limite (Rigorosamente Squadrato come richiesto)
+                // Modulo Velocità + Cartello Limite + Modulo Tutor Media
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     MetricDashboard("$speed", "KM/H", speedColor)
+                    
                     if (speedLimit != null) {
-                        Surface(
-                            shape = RectangleShape,
-                            color = TextWhite,
-                            border = BorderStroke(3.dp, AlertRed),
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text("$speedLimit", color = DarkBackground, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            }
+                        Surface(shape = RectangleShape, color = TextWhite, border = BorderStroke(3.dp, AlertRed), modifier = Modifier.size(36.dp)) {
+                            Box(contentAlignment = Alignment.Center) { Text("$speedLimit", color = DarkBackground, fontWeight = FontWeight.Bold, fontSize = 14.sp) }
+                        }
+                    }
+
+                    if (inTutorZone) {
+                        val isAvgSpeeding = speedLimit != null && avgTutorSpeed > speedLimit
+                        val avgColor = if (isAvgSpeeding) AlertRed else AlertAmber
+                        Surface(shape = RectangleShape, color = Color(0x33FF9F0A), modifier = Modifier.padding(start = 8.dp)) {
+                            MetricDashboard("$avgTutorSpeed", "MEDIA", avgColor, modifier = Modifier.padding(horizontal = 8.dp))
                         }
                     }
                 }
@@ -498,7 +538,7 @@ private fun EtaCard(speed: Int, speedLimit: Int?, remainingDistance: Double, rem
 }
 
 @Composable
-private fun MetricDashboard(value: String, unit: String, color: Color) = Column(horizontalAlignment = Alignment.CenterHorizontally) {
+private fun MetricDashboard(value: String, unit: String, color: Color, modifier: Modifier = Modifier) = Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
     Text(value, color = color, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
     Text(unit, color = TextGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
 }
@@ -642,7 +682,7 @@ private fun instruction(type: String, mod: String, name: String): String {
 private fun get(address: String): String {
     val c = (URL(address).openConnection() as HttpURLConnection).apply {
         connectTimeout = 15000; readTimeout = 20000; requestMethod = "GET"
-        setRequestProperty("User-Agent", "StradaSafeLiguria/0.91 private prototype")
+        setRequestProperty("User-Agent", "StradaSafeLiguria/0.92 private prototype")
         setRequestProperty("Accept-Language", "it")
     }
     try {
