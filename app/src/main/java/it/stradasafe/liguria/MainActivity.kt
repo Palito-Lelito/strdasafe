@@ -207,7 +207,6 @@ private fun App(client: FusedLocationProviderClient) {
         if (!navigating || gps == null || route == null) return@LaunchedEffect
         val currentTime = System.currentTimeMillis()
 
-        // --- 1. Overpass API Limiti di Velocità ---
         if (currentTime - AppState.lastSpeedLimitCheck.longValue > 20000) {
             AppState.lastSpeedLimitCheck.longValue = currentTime
             scope.launch {
@@ -216,7 +215,6 @@ private fun App(client: FusedLocationProviderClient) {
             }
         }
 
-        // --- 2. Manovre TTS ---
         val steps = route!!.steps
         if (stepIndex < steps.lastIndex && distanceToStep < 30) stepIndex++
 
@@ -226,7 +224,6 @@ private fun App(client: FusedLocationProviderClient) {
             lastSpoken = stepIndex
         }
 
-        // --- 3. Safety Devices & Logica TUTOR ---
         val unalerted = AppState.safetyDevices.value.filter { it !in AppState.alertedDevices }
         val nearbyDevice = unalerted.firstOrNull { distanceMeters(gps.latitude, gps.longitude, it.lat, it.lon) < 500 }
         
@@ -249,12 +246,10 @@ private fun App(client: FusedLocationProviderClient) {
             }
         }
 
-        // Calcolo velocità media live se nel tutor
         if (AppState.inTutorZone.value) {
             val distTraveledMeters = AppState.tutorStartDistanceRemaining.doubleValue - remainingDistance
             val timeElapsedMillis = currentTime - AppState.tutorStartTime.longValue
             
-            // Buffer iniziale di sicurezza per evitare velocità infinite (5 sec, 50 metri)
             if (timeElapsedMillis > 5000 && distTraveledMeters > 50) {
                 val timeHours = timeElapsedMillis / 3600000.0
                 val distKm = distTraveledMeters / 1000.0
@@ -262,7 +257,6 @@ private fun App(client: FusedLocationProviderClient) {
             }
         }
 
-        // --- 4. Ricalcolo Percorso ---
         val offRoute = distanceToPolyline(gps.latitude, gps.longitude, route!!.points) > 75
         if (offRoute && currentTime - lastReroute > 15000) {
             lastReroute = currentTime
@@ -364,11 +358,13 @@ private suspend fun fetchSpeedLimit(lat: Double, lon: Double): Int? = withContex
     null
 }
 
-// --- LOGICA PARSING SAFETY DEVICES ---
+// --- LOGICA PARSING SAFETY DEVICES (Aggiornata per Schema 1) ---
 private fun loadSafetyDevices(context: Context): List<SafetyDevice> {
     return try {
         val jsonString = context.assets.open("safety_devices.demo.json").bufferedReader().use { it.readText() }
         val list = mutableListOf<SafetyDevice>()
+        
+        // Tentativo 1: GeoJSON standard
         try {
             val root = JSONObject(jsonString)
             if (root.optString("type") == "FeatureCollection") {
@@ -387,6 +383,25 @@ private fun loadSafetyDevices(context: Context): List<SafetyDevice> {
             }
         } catch (_: Exception) {}
 
+        // Tentativo 2: Formato "Schema 1" (Oggetto complesso con array "devices")
+        try {
+            val root = JSONObject(jsonString)
+            if (root.has("devices")) {
+                val devices = root.getJSONArray("devices")
+                for (i in 0 until devices.length()) {
+                    val obj = devices.getJSONObject(i)
+                    val lat = obj.optDouble("lat", Double.NaN)
+                    val lon = obj.optDouble("lon", Double.NaN)
+                    val type = obj.optString("type", obj.optString("id", "Segnalazione"))
+                    if (!lat.isNaN() && !lon.isNaN()) {
+                        list.add(SafetyDevice(lat, lon, type))
+                    }
+                }
+                return list
+            }
+        } catch (_: Exception) {}
+
+        // Tentativo 3: Formato Array JSON semplice (Vecchio formato)
         val array = JSONArray(jsonString)
         for (i in 0 until array.length()) {
             val obj = array.getJSONObject(i)
@@ -510,7 +525,6 @@ private fun EtaCard(
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 
-                // Modulo Velocità + Cartello Limite + Modulo Tutor Media
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     MetricDashboard("$speed", "KM/H", speedColor)
                     
