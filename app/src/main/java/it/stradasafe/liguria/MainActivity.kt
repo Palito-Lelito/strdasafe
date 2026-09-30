@@ -16,6 +16,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -71,6 +73,17 @@ private val TextGray = Color(0xFF8E8E93)
 private const val STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
 private const val SEARCH_BASE = "https://nominatim.openstreetmap.org"
 private const val ROUTE_BASE = "https://router.project-osrm.org"
+
+// Stato globale persistente: sopravvive alla rotazione dello schermo senza azzerare la navigazione
+object AppState {
+    val query = mutableStateOf("")
+    val searchResults = mutableStateOf<List<Place>>(emptyList())
+    val place = mutableStateOf<Place?>(null)
+    val route = mutableStateOf<RouteData?>(null)
+    val navigating = mutableStateOf(false)
+    val isSearchExpanded = mutableStateOf(false)
+    val stepIndex = mutableIntStateOf(0)
+}
 
 class MainActivity : ComponentActivity() {
     private lateinit var client: FusedLocationProviderClient
@@ -139,6 +152,15 @@ private fun App(client: FusedLocationProviderClient) {
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val (tts, ttsReady) = rememberSpeaker()
 
+    // Collega i dati allo stato globale per sopravvivere alla rotazione
+    var query by AppState.query
+    var searchResults by AppState.searchResults
+    var place by AppState.place
+    var route by AppState.route
+    var navigating by AppState.navigating
+    var isSearchExpanded by AppState.isSearchExpanded
+    var stepIndex by AppState.stepIndex
+
     var granted by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(
@@ -151,18 +173,9 @@ private fun App(client: FusedLocationProviderClient) {
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
     val gps = rememberGps(client, granted)
 
-    var query by remember { mutableStateOf("") }
-    var searchResults by remember { mutableStateOf<List<Place>>(emptyList()) }
-    var place by remember { mutableStateOf<Place?>(null) }
-    var route by remember { mutableStateOf<RouteData?>(null) }
-
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var navigating by remember { mutableStateOf(false) }
     var muted by remember { mutableStateOf(false) }
-    var isSearchExpanded by remember { mutableStateOf(false) }
-
-    var stepIndex by remember { mutableIntStateOf(0) }
     var lastSpoken by remember { mutableIntStateOf(-1) }
     var lastReroute by remember { mutableLongStateOf(0L) }
 
@@ -221,26 +234,23 @@ private fun App(client: FusedLocationProviderClient) {
             Box(Modifier.fillMaxSize().systemBarsPadding().padding(16.dp)) {
                 
                 if (isLandscape) {
-                    // MODALITÀ ORIZZONTALE: Pannello laterale sinistro
+                    // MODALITÀ ORIZZONTALE: Pannello laterale sinistro ora scorrevole
                     Column(
                         Modifier
                             .fillMaxHeight()
-                            .widthIn(max = 380.dp),
-                        verticalArrangement = Arrangement.SpaceBetween
+                            .widthIn(max = 380.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         TopStatusBar(gps, navigating, muted, onMuteToggle = { muted = !muted })
                         
-                        Spacer(Modifier.height(10.dp))
-                        
                         if (navigating && route != null) {
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.SpaceBetween) {
-                                ManeuverCard(currentStep, distanceToStep)
-                                EtaCard(speed, remainingDistance, remainingDuration, onStop = {
-                                    navigating = false
-                                    stepIndex = 0
-                                    tts?.stop()
-                                })
-                            }
+                            ManeuverCard(currentStep, distanceToStep)
+                            EtaCard(speed, remainingDistance, remainingDuration, onStop = {
+                                navigating = false
+                                stepIndex = 0
+                                tts?.stop()
+                            })
                         } else if (route != null) {
                             OverviewCard(route!!, place, onStart = { navigating = true; isSearchExpanded = false }, onReset = { route = null; place = null })
                         } else if (isSearchExpanded) {
