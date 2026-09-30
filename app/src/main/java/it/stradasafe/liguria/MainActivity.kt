@@ -12,6 +12,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -89,6 +90,10 @@ object AppState {
     // Safety Devices (Autovelox, Pericoli)
     val safetyDevices = mutableStateOf<List<SafetyDevice>>(emptyList())
     val alertedDevices = mutableSetOf<SafetyDevice>()
+    
+    // Limiti di velocità (Live Overpass API)
+    val speedLimit = mutableStateOf<Int?>(null)
+    val lastSpeedLimitCheck = mutableLongStateOf(0L)
 }
 
 class MainActivity : ComponentActivity() {
@@ -159,11 +164,8 @@ private fun App(client: FusedLocationProviderClient) {
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val (tts, ttsReady) = rememberSpeaker()
 
-    // Caricamento dei dispositivi di sicurezza all'avvio
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            AppState.safetyDevices.value = loadSafetyDevices(context)
-        }
+        withContext(Dispatchers.IO) { AppState.safetyDevices.value = loadSafetyDevices(context) }
     }
 
     var query by AppState.query
@@ -173,11 +175,10 @@ private fun App(client: FusedLocationProviderClient) {
     var navigating by AppState.navigating
     var isSearchExpanded by AppState.isSearchExpanded
     var stepIndex by AppState.stepIndex
+    var speedLimit by AppState.speedLimit
 
     var granted by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        )
+        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED)
     }
 
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
@@ -190,9 +191,7 @@ private fun App(client: FusedLocationProviderClient) {
     var lastReroute by remember { mutableLongStateOf(0L) }
 
     val currentStep = route?.steps?.getOrNull(stepIndex)
-    val distanceToStep = if (gps != null && currentStep != null) {
-        distanceMeters(gps.latitude, gps.longitude, currentStep.lat, currentStep.lon)
-    } else Double.NaN
+    val distanceToStep = if (gps != null && currentStep != null) distanceMeters(gps.latitude, gps.longitude, currentStep.lat, currentStep.lon) else Double.NaN
 
     val speed = ((gps?.speed ?: 0f) * 3.6f).roundToInt().coerceAtLeast(0)
     val remainingDistance = route?.steps?.drop(stepIndex)?.sumOf { it.distance } ?: 0.0
@@ -201,43 +200,45 @@ private fun App(client: FusedLocationProviderClient) {
     LaunchedEffect(gps, navigating, route) {
         if (!navigating || gps == null || route == null) return@LaunchedEffect
         
-        // --- 1. Logica Manovre TTS ---
-        val steps = route!!.steps
-        if (stepIndex < steps.lastIndex && distanceToStep < 30) {
-            stepIndex++
+        // --- 1. Motore Overpass API Limiti di Velocità (V0.91) ---
+        // Controlla il limite ogni 20 secondi per non saturare l'API gratuita
+        val currentTime = System.currentTimeMillis()
+        if (currentTime - AppState.lastSpeedLimitCheck.longValue > 20000) {
+            AppState.lastSpeedLimitCheck.longValue = currentTime
+            scope.launch {
+                val limit = fetchSpeedLimit(gps.latitude, gps.longitude)
+                if (limit != null) speedLimit = limit
+            }
         }
+
+        // --- 2. Logica Manovre TTS ---
+        val steps = route!!.steps
+        if (stepIndex < steps.lastIndex && distanceToStep < 30) stepIndex++
 
         val s = steps.getOrNull(stepIndex)
         if (s != null && stepIndex != lastSpoken && distanceMeters(gps.latitude, gps.longitude, s.lat, s.lon) < 300) {
-            if (!muted && ttsReady) {
-                tts?.speak("Tra ${distanceMeters(gps.latitude, gps.longitude, s.lat, s.lon).roundToInt()} metri, ${s.text}", TextToSpeech.QUEUE_ADD, null, "step-$stepIndex")
-            }
+            if (!muted && ttsReady) tts?.speak("Tra ${distanceMeters(gps.latitude, gps.longitude, s.lat, s.lon).roundToInt()} metri, ${s.text}", TextToSpeech.QUEUE_ADD, null, "step-$stepIndex")
             lastSpoken = stepIndex
         }
 
-        // --- 2. Logica Alert Autovelox & Pericoli (V0.9) ---
+        // --- 3. Logica Alert Autovelox & Pericoli ---
         val unalerted = AppState.safetyDevices.value.filter { it !in AppState.alertedDevices }
         val nearbyDevice = unalerted.firstOrNull { distanceMeters(gps.latitude, gps.longitude, it.lat, it.lon) < 500 }
         
         if (nearbyDevice != null) {
             AppState.alertedDevices.add(nearbyDevice)
-            if (!muted && ttsReady) {
-                tts?.speak("Attenzione, ${nearbyDevice.type} a 500 metri", TextToSpeech.QUEUE_ADD, null, "safety_${nearbyDevice.hashCode()}")
-            }
+            if (!muted && ttsReady) tts?.speak("Attenzione, ${nearbyDevice.type} a 500 metri", TextToSpeech.QUEUE_ADD, null, "safety_${nearbyDevice.hashCode()}")
         }
 
-        // --- 3. Logica Ricalcolo Percorso ---
+        // --- 4. Ricalcolo Percorso ---
         val offRoute = distanceToPolyline(gps.latitude, gps.longitude, route!!.points) > 75
-        if (offRoute && System.currentTimeMillis() - lastReroute > 15000) {
-            lastReroute = System.currentTimeMillis()
+        if (offRoute && currentTime - lastReroute > 15000) {
+            lastReroute = currentTime
             scope.launch {
                 try {
                     route = fetchRoute(gps, place!!)
-                    stepIndex = 0
-                    lastSpoken = -1
-                    if (!muted && ttsReady) {
-                        tts?.speak("Ricalcolo del percorso", TextToSpeech.QUEUE_FLUSH, null, "reroute")
-                    }
+                    stepIndex = 0; lastSpoken = -1
+                    if (!muted && ttsReady) tts?.speak("Ricalcolo del percorso", TextToSpeech.QUEUE_FLUSH, null, "reroute")
                 } catch (_: Exception) {}
             }
         }
@@ -253,7 +254,7 @@ private fun App(client: FusedLocationProviderClient) {
                         TopStatusBar(gps, navigating, muted, onMuteToggle = { muted = !muted })
                         if (navigating && route != null) {
                             ManeuverCard(currentStep, distanceToStep)
-                            EtaCard(speed, remainingDistance, remainingDuration, onStop = { navigating = false; stepIndex = 0; tts?.stop(); AppState.alertedDevices.clear() })
+                            EtaCard(speed, speedLimit, remainingDistance, remainingDuration, onStop = { navigating = false; stepIndex = 0; tts?.stop(); AppState.alertedDevices.clear(); speedLimit = null })
                         } else if (route != null) {
                             OverviewCard(route!!, place, onStart = { navigating = true; isSearchExpanded = false }, onReset = { route = null; place = null })
                         } else if (isSearchExpanded) {
@@ -275,7 +276,7 @@ private fun App(client: FusedLocationProviderClient) {
                         }
                         Column {
                             if (navigating && route != null) {
-                                EtaCard(speed, remainingDistance, remainingDuration, onStop = { navigating = false; stepIndex = 0; tts?.stop(); AppState.alertedDevices.clear() })
+                                EtaCard(speed, speedLimit, remainingDistance, remainingDuration, onStop = { navigating = false; stepIndex = 0; tts?.stop(); AppState.alertedDevices.clear(); speedLimit = null })
                             } else if (route != null) {
                                 OverviewCard(route!!, place, onStart = { navigating = true; isSearchExpanded = false }, onReset = { route = null; place = null })
                             } else if (isSearchExpanded) {
@@ -295,13 +296,43 @@ private fun App(client: FusedLocationProviderClient) {
     }
 }
 
-// --- LOGICA PARSING SAFETY DEVICES (V0.9) ---
+// --- LOGICA OVERPASS API (Limiti di Velocità in Tempo Reale) ---
+private suspend fun fetchSpeedLimit(lat: Double, lon: Double): Int? = withContext(Dispatchers.IO) {
+    try {
+        // Query circolare a 20 metri dalla posizione GPS attuale
+        val query = "[out:json][timeout:3];way(around:20,$lat,$lon)[\"maxspeed\"];out tags;"
+        val e = URLEncoder.encode(query, "UTF-8")
+        val c = (URL("https://overpass-api.de/api/interpreter?data=$e").openConnection() as HttpURLConnection).apply {
+            connectTimeout = 3000
+            readTimeout = 3000
+            requestMethod = "GET"
+            setRequestProperty("User-Agent", "StradaSafeLiguria/0.91")
+        }
+        val res = c.inputStream.bufferedReader().use { it.readText() }
+        val els = JSONObject(res).optJSONArray("elements") ?: return@withContext null
+        
+        for (i in 0 until els.length()) {
+            val tags = els.getJSONObject(i).optJSONObject("tags")
+            val ms = tags?.optString("maxspeed")
+            if (!ms.isNullOrEmpty()) {
+                return@withContext when (ms) {
+                    "IT:urban" -> 50
+                    "IT:rural" -> 90
+                    "IT:motorway" -> 130
+                    "IT:extra_urban" -> 110
+                    else -> ms.filter { it.isDigit() }.toIntOrNull()
+                }
+            }
+        }
+    } catch (_: Exception) {}
+    null
+}
+
+// --- LOGICA PARSING SAFETY DEVICES ---
 private fun loadSafetyDevices(context: Context): List<SafetyDevice> {
     return try {
         val jsonString = context.assets.open("safety_devices.demo.json").bufferedReader().use { it.readText() }
         val list = mutableListOf<SafetyDevice>()
-        
-        // Tentativo 1: Formato GeoJSON standard
         try {
             val root = JSONObject(jsonString)
             if (root.optString("type") == "FeatureCollection") {
@@ -320,21 +351,16 @@ private fun loadSafetyDevices(context: Context): List<SafetyDevice> {
             }
         } catch (_: Exception) {}
 
-        // Tentativo 2: Fallback formato Array JSON semplice
         val array = JSONArray(jsonString)
         for (i in 0 until array.length()) {
             val obj = array.getJSONObject(i)
             val lat = obj.optDouble("lat", obj.optDouble("latitude", Double.NaN))
             val lon = obj.optDouble("lon", obj.optDouble("longitude", Double.NaN))
             val type = obj.optString("type", obj.optString("name", "Segnalazione"))
-            if (!lat.isNaN() && !lon.isNaN()) {
-                list.add(SafetyDevice(lat, lon, type))
-            }
+            if (!lat.isNaN() && !lon.isNaN()) list.add(SafetyDevice(lat, lon, type))
         }
         list
-    } catch (e: Exception) {
-        emptyList()
-    }
+    } catch (e: Exception) { emptyList() }
 }
 
 // --- COMPONENTI UI MODULARI ---
@@ -344,7 +370,7 @@ private fun TopStatusBar(gps: Location?, navigating: Boolean, muted: Boolean, on
     Surface(color = CardSurface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(8.dp, RectangleShape)) {
         Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column {
-                Text("STRADASAFE 0.9", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text("STRADASAFE 0.91", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Text(
                     if (gps != null) "GPS Attivo (${gps.accuracy.roundToInt()}m)" else "Ricerca segnale GPS...",
                     color = if (gps != null) WazeGreen else AlertAmber,
@@ -433,15 +459,36 @@ private fun ManeuverCard(step: Step?, distanceToStep: Double) {
 }
 
 @Composable
-private fun EtaCard(speed: Int, remainingDistance: Double, remainingDuration: Double, onStop: () -> Unit) {
+private fun EtaCard(speed: Int, speedLimit: Int?, remainingDistance: Double, remainingDuration: Double, onStop: () -> Unit) {
     val etaMillis = System.currentTimeMillis() + (remainingDuration * 1000).toLong()
     val etaFormat = java.text.SimpleDateFormat("HH:mm", Locale.getDefault())
     val etaString = if (remainingDuration > 0) etaFormat.format(java.util.Date(etaMillis)) else "--:--"
 
+    // Se si supera il limite, il testo della velocità diventa rosso
+    val isSpeeding = speedLimit != null && speed > speedLimit
+    val speedColor = if (isSpeeding) AlertRed else TextWhite
+
     Surface(color = CardSurface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(16.dp, RectangleShape)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                MetricDashboard("$speed", "KM/H", if (speed > 130) AlertRed else TextWhite)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                
+                // Modulo Velocità + Cartello del Limite (Rigorosamente Squadrato come richiesto)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MetricDashboard("$speed", "KM/H", speedColor)
+                    if (speedLimit != null) {
+                        Surface(
+                            shape = RectangleShape,
+                            color = TextWhite,
+                            border = BorderStroke(3.dp, AlertRed),
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text("$speedLimit", color = DarkBackground, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                        }
+                    }
+                }
+                
                 MetricDashboard("%.1f".format(remainingDistance / 1000), "KM", TextWhite)
                 MetricDashboard(etaString, "ARRIVO", WazeGreen)
             }
@@ -487,7 +534,6 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, follow
                         s.addSource(GeoJsonSource("route"))
                         s.addLayer(LineLayer("route-l", "route").withProperties(lineColor("#64D2FF"), lineWidth(8f)))
 
-                        // V0.9: Layer per i dispositivi di sicurezza
                         s.addSource(GeoJsonSource("safety"))
                         s.addLayer(CircleLayer("safety-l", "safety").withProperties(circleRadius(7f), circleColor("#FF453A"), circleStrokeColor("#FFFFFF"), circleStrokeWidth(2f)))
 
@@ -511,11 +557,8 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, follow
                     }
                 }
 
-                // Disegna i punti di sicurezza caricati nello stato
                 val safetyPoints = AppState.safetyDevices.value.map { Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) }
-                if (safetyPoints.isNotEmpty()) {
-                    m.style?.getSourceAs<GeoJsonSource>("safety")?.setGeoJson(FeatureCollection.fromFeatures(safetyPoints))
-                }
+                if (safetyPoints.isNotEmpty()) m.style?.getSourceAs<GeoJsonSource>("safety")?.setGeoJson(FeatureCollection.fromFeatures(safetyPoints))
 
                 if (follow && location != null) {
                     m.cameraPosition = CameraPosition.Builder()
@@ -531,8 +574,7 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, follow
     )
 
     DisposableEffect(mapView) {
-        mapView.onStart()
-        mapView.onResume()
+        mapView.onStart(); mapView.onResume()
         onDispose { mapView.onPause(); mapView.onStop(); mapView.onDestroy() }
     }
 }
@@ -600,7 +642,7 @@ private fun instruction(type: String, mod: String, name: String): String {
 private fun get(address: String): String {
     val c = (URL(address).openConnection() as HttpURLConnection).apply {
         connectTimeout = 15000; readTimeout = 20000; requestMethod = "GET"
-        setRequestProperty("User-Agent", "StradaSafeLiguria/0.9 private prototype")
+        setRequestProperty("User-Agent", "StradaSafeLiguria/0.91 private prototype")
         setRequestProperty("Accept-Language", "it")
     }
     try {
