@@ -14,7 +14,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -48,8 +47,8 @@ import org.maplibre.geojson.Feature
 import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
 import java.net.HttpURLConnection
-import java.net.URLEncoder
 import java.net.URL
+import java.net.URLEncoder
 import java.util.Locale
 import kotlin.math.*
 
@@ -79,7 +78,7 @@ class MainActivity : ComponentActivity() {
 }
 
 data class Place(val name: String, val lat: Double, val lon: Double)
-data class Step(val text: String, val lat: Double, val lon: Double, val distance: Double, val maneuver: String)
+data class Step(val text: String, val lat: Double, val lon: Double, val distance: Double, val duration: Double, val maneuver: String)
 data class RouteData(val points: List<Point>, val distance: Double, val duration: Double, val steps: List<Step>)
 
 @SuppressLint("MissingPermission")
@@ -165,6 +164,10 @@ private fun App(client: FusedLocationProviderClient) {
 
     val speed = ((gps?.speed ?: 0f) * 3.6f).roundToInt().coerceAtLeast(0)
 
+    // Logica dinamica: calcolo dei chilometri e del tempo rimanente scartando i passaggi già completati
+    val remainingDistance = route?.steps?.drop(stepIndex)?.sumOf { it.distance } ?: 0.0
+    val remainingDuration = route?.steps?.drop(stepIndex)?.sumOf { it.duration } ?: 0.0
+
     LaunchedEffect(gps, navigating, route) {
         if (!navigating || gps == null || route == null) return@LaunchedEffect
         val steps = route!!.steps
@@ -236,11 +239,18 @@ private fun App(client: FusedLocationProviderClient) {
 
                 // Pannello Inferiore di Navigazione o Ricerca
                 if (navigating && route != null) {
-                    AppleWazeNavigationCard(currentStep, distanceToStep, speed, route!!, onStop = {
-                        navigating = false
-                        stepIndex = 0
-                        tts?.stop()
-                    })
+                    AppleWazeNavigationCard(
+                        step = currentStep,
+                        distanceToStep = distanceToStep,
+                        speed = speed,
+                        remainingDistance = remainingDistance,
+                        remainingDuration = remainingDuration,
+                        onStop = {
+                            navigating = false
+                            stepIndex = 0
+                            tts?.stop()
+                        }
+                    )
                 } else {
                     SearchCard(
                         query,
@@ -383,7 +393,19 @@ private fun SearchCard(
 }
 
 @Composable
-private fun AppleWazeNavigationCard(step: Step?, distance: Double, speed: Int, route: RouteData, onStop: () -> Unit) {
+private fun AppleWazeNavigationCard(
+    step: Step?,
+    distanceToStep: Double,
+    speed: Int,
+    remainingDistance: Double,
+    remainingDuration: Double,
+    onStop: () -> Unit
+) {
+    // Calcolo dell'Orario di Arrivo Stimato (ETA)
+    val etaMillis = System.currentTimeMillis() + (remainingDuration * 1000).toLong()
+    val etaFormat = java.text.SimpleDateFormat("HH:mm", Locale.getDefault())
+    val etaString = if (remainingDuration > 0) etaFormat.format(java.util.Date(etaMillis)) else "--:--"
+
     Surface(color = CardSurface, shape = RectangleShape) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             // Blocco Manovra Principale (Stile Apple/Waze)
@@ -396,7 +418,7 @@ private fun AppleWazeNavigationCard(step: Step?, distance: Double, speed: Int, r
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        if (distance.isNaN()) "..." else "${distance.roundToInt()} m",
+                        if (distanceToStep.isNaN()) "..." else "${distanceToStep.roundToInt()} m",
                         color = WazeCyan,
                         fontSize = 26.sp,
                         fontWeight = FontWeight.Bold
@@ -413,11 +435,11 @@ private fun AppleWazeNavigationCard(step: Step?, distance: Double, speed: Int, r
 
             HorizontalDivider(color = Color(0x33FFFFFF))
 
-            // Cruscotto inferiore in tempo reale (Waze style)
+            // Cruscotto inferiore in tempo reale (Waze style dinamico)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 MetricDashboard("$speed", "KM/H", if (speed > 130) AlertAmber else WazeCyan)
-                MetricDashboard("%.1f".format(route.distance / 1000), "KM", TextWhite)
-                MetricDashboard("${(route.duration / 60).roundToInt()}", "MIN", WazeGreen)
+                MetricDashboard("%.1f".format(remainingDistance / 1000), "KM", TextWhite)
+                MetricDashboard(etaString, "ARRIVO", WazeGreen)
             }
 
             OutlinedButton(
@@ -589,6 +611,7 @@ private suspend fun fetchRoute(l: Location, p: Place): RouteData = withContext(D
                 lat = loc.getDouble(1),
                 lon = loc.getDouble(0),
                 distance = s.optDouble("distance"),
+                duration = s.optDouble("duration"),
                 maneuver = man.optString("modifier")
             )
         }
