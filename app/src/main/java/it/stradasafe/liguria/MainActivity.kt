@@ -2,6 +2,7 @@ package it.stradasafe.liguria
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.location.Location
@@ -51,6 +52,7 @@ import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.PropertyFactory.*
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
+import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
 import java.net.HttpURLConnection
@@ -61,7 +63,7 @@ import kotlin.math.*
 
 // Palette iOS 27 Dark Mode & Waze Hybrid
 private val DarkBackground = Color(0xFF000000)
-private val CardSurface = Color(0xE61C1C1E) // iOS Dark Surface Translucent
+private val CardSurface = Color(0xE61C1C1E)
 private val AppleBlue = Color(0xFF0A84FF)
 private val WazeCyan = Color(0xFF64D2FF)
 private val WazeGreen = Color(0xFF32D74B)
@@ -74,7 +76,7 @@ private const val STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
 private const val SEARCH_BASE = "https://nominatim.openstreetmap.org"
 private const val ROUTE_BASE = "https://router.project-osrm.org"
 
-// Stato globale persistente: sopravvive alla rotazione dello schermo senza azzerare la navigazione
+// Stato globale persistente
 object AppState {
     val query = mutableStateOf("")
     val searchResults = mutableStateOf<List<Place>>(emptyList())
@@ -83,6 +85,10 @@ object AppState {
     val navigating = mutableStateOf(false)
     val isSearchExpanded = mutableStateOf(false)
     val stepIndex = mutableIntStateOf(0)
+    
+    // Safety Devices (Autovelox, Pericoli)
+    val safetyDevices = mutableStateOf<List<SafetyDevice>>(emptyList())
+    val alertedDevices = mutableSetOf<SafetyDevice>()
 }
 
 class MainActivity : ComponentActivity() {
@@ -99,6 +105,7 @@ class MainActivity : ComponentActivity() {
 data class Place(val name: String, val lat: Double, val lon: Double)
 data class Step(val text: String, val lat: Double, val lon: Double, val distance: Double, val duration: Double, val maneuver: String)
 data class RouteData(val points: List<Point>, val distance: Double, val duration: Double, val steps: List<Step>)
+data class SafetyDevice(val lat: Double, val lon: Double, val type: String)
 
 @SuppressLint("MissingPermission")
 @Composable
@@ -152,7 +159,13 @@ private fun App(client: FusedLocationProviderClient) {
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val (tts, ttsReady) = rememberSpeaker()
 
-    // Collega i dati allo stato globale per sopravvivere alla rotazione
+    // Caricamento dei dispositivi di sicurezza all'avvio
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            AppState.safetyDevices.value = loadSafetyDevices(context)
+        }
+    }
+
     var query by AppState.query
     var searchResults by AppState.searchResults
     var place by AppState.place
@@ -163,10 +176,7 @@ private fun App(client: FusedLocationProviderClient) {
 
     var granted by remember {
         mutableStateOf(
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         )
     }
 
@@ -190,8 +200,9 @@ private fun App(client: FusedLocationProviderClient) {
 
     LaunchedEffect(gps, navigating, route) {
         if (!navigating || gps == null || route == null) return@LaunchedEffect
+        
+        // --- 1. Logica Manovre TTS ---
         val steps = route!!.steps
-
         if (stepIndex < steps.lastIndex && distanceToStep < 30) {
             stepIndex++
         }
@@ -199,16 +210,23 @@ private fun App(client: FusedLocationProviderClient) {
         val s = steps.getOrNull(stepIndex)
         if (s != null && stepIndex != lastSpoken && distanceMeters(gps.latitude, gps.longitude, s.lat, s.lon) < 300) {
             if (!muted && ttsReady) {
-                tts?.speak(
-                    "Tra ${distanceMeters(gps.latitude, gps.longitude, s.lat, s.lon).roundToInt()} metri, ${s.text}",
-                    TextToSpeech.QUEUE_FLUSH,
-                    null,
-                    "step-$stepIndex"
-                )
+                tts?.speak("Tra ${distanceMeters(gps.latitude, gps.longitude, s.lat, s.lon).roundToInt()} metri, ${s.text}", TextToSpeech.QUEUE_ADD, null, "step-$stepIndex")
             }
             lastSpoken = stepIndex
         }
 
+        // --- 2. Logica Alert Autovelox & Pericoli (V0.9) ---
+        val unalerted = AppState.safetyDevices.value.filter { it !in AppState.alertedDevices }
+        val nearbyDevice = unalerted.firstOrNull { distanceMeters(gps.latitude, gps.longitude, it.lat, it.lon) < 500 }
+        
+        if (nearbyDevice != null) {
+            AppState.alertedDevices.add(nearbyDevice)
+            if (!muted && ttsReady) {
+                tts?.speak("Attenzione, ${nearbyDevice.type} a 500 metri", TextToSpeech.QUEUE_ADD, null, "safety_${nearbyDevice.hashCode()}")
+            }
+        }
+
+        // --- 3. Logica Ricalcolo Percorso ---
         val offRoute = distanceToPolyline(gps.latitude, gps.longitude, route!!.points) > 75
         if (offRoute && System.currentTimeMillis() - lastReroute > 15000) {
             lastReroute = System.currentTimeMillis()
@@ -218,7 +236,7 @@ private fun App(client: FusedLocationProviderClient) {
                     stepIndex = 0
                     lastSpoken = -1
                     if (!muted && ttsReady) {
-                        tts?.speak("Ricalcolo del percorso in corso", TextToSpeech.QUEUE_FLUSH, null, "reroute")
+                        tts?.speak("Ricalcolo del percorso", TextToSpeech.QUEUE_FLUSH, null, "reroute")
                     }
                 } catch (_: Exception) {}
             }
@@ -227,54 +245,21 @@ private fun App(client: FusedLocationProviderClient) {
 
     MaterialTheme(colorScheme = darkColorScheme(primary = AppleBlue, background = DarkBackground, surface = CardSurface)) {
         Box(Modifier.fillMaxSize().background(DarkBackground)) {
-            // Mappa sempre a tutto schermo (sotto i pannelli fluttuanti)
             NavMap(gps, place, route, navigating)
 
-            // Contenitore UI con padding dai bordi dello schermo (Floating layout iOS style)
             Box(Modifier.fillMaxSize().systemBarsPadding().padding(16.dp)) {
-                
                 if (isLandscape) {
-                    // MODALITÀ ORIZZONTALE: Pannello laterale sinistro ora scorrevole
-                    Column(
-                        Modifier
-                            .fillMaxHeight()
-                            .widthIn(max = 380.dp)
-                            .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
+                    Column(Modifier.fillMaxHeight().widthIn(max = 380.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         TopStatusBar(gps, navigating, muted, onMuteToggle = { muted = !muted })
-                        
                         if (navigating && route != null) {
                             ManeuverCard(currentStep, distanceToStep)
-                            EtaCard(speed, remainingDistance, remainingDuration, onStop = {
-                                navigating = false
-                                stepIndex = 0
-                                tts?.stop()
-                            })
+                            EtaCard(speed, remainingDistance, remainingDuration, onStop = { navigating = false; stepIndex = 0; tts?.stop(); AppState.alertedDevices.clear() })
                         } else if (route != null) {
                             OverviewCard(route!!, place, onStart = { navigating = true; isSearchExpanded = false }, onReset = { route = null; place = null })
                         } else if (isSearchExpanded) {
                             SearchExpandedCard(query, { query = it }, granted, { ask.launch(Manifest.permission.ACCESS_FINE_LOCATION) }, busy, error, searchResults,
-                                onSearch = {
-                                    scope.launch {
-                                        busy = true
-                                        error = null
-                                        try { searchResults = searchPlaces(query) } 
-                                        catch (e: Exception) { error = e.message ?: "Errore" } 
-                                        finally { busy = false }
-                                    }
-                                },
-                                onPlaceSelected = { p ->
-                                    scope.launch {
-                                        busy = true
-                                        error = null
-                                        searchResults = emptyList()
-                                        place = p
-                                        try { route = fetchRoute(gps ?: error("Attendi GPS"), p) } 
-                                        catch (e: Exception) { error = e.message ?: "Errore" } 
-                                        finally { busy = false; isSearchExpanded = false }
-                                    }
-                                },
+                                onSearch = { scope.launch { busy = true; error = null; try { searchResults = searchPlaces(query) } catch (e: Exception) { error = e.message } finally { busy = false } } },
+                                onPlaceSelected = { p -> scope.launch { busy = true; error = null; searchResults = emptyList(); place = p; try { route = fetchRoute(gps ?: error("Attendi GPS"), p) } catch (e: Exception) { error = e.message } finally { busy = false; isSearchExpanded = false } } },
                                 onClose = { isSearchExpanded = false }
                             )
                         } else {
@@ -282,50 +267,21 @@ private fun App(client: FusedLocationProviderClient) {
                         }
                     }
                 } else {
-                    // MODALITÀ VERTICALE (Ritratto): Fluttuante Top & Bottom
                     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
-                        
-                        // Header Superiore (Stato o Manovra)
                         Column {
                             TopStatusBar(gps, navigating, muted, onMuteToggle = { muted = !muted })
                             Spacer(Modifier.height(10.dp))
-                            if (navigating && route != null) {
-                                ManeuverCard(currentStep, distanceToStep)
-                            }
+                            if (navigating && route != null) ManeuverCard(currentStep, distanceToStep)
                         }
-
-                        // Pannello Inferiore (ETA, Overview, o Ricerca)
                         Column {
                             if (navigating && route != null) {
-                                EtaCard(speed, remainingDistance, remainingDuration, onStop = {
-                                    navigating = false
-                                    stepIndex = 0
-                                    tts?.stop()
-                                })
+                                EtaCard(speed, remainingDistance, remainingDuration, onStop = { navigating = false; stepIndex = 0; tts?.stop(); AppState.alertedDevices.clear() })
                             } else if (route != null) {
                                 OverviewCard(route!!, place, onStart = { navigating = true; isSearchExpanded = false }, onReset = { route = null; place = null })
                             } else if (isSearchExpanded) {
                                 SearchExpandedCard(query, { query = it }, granted, { ask.launch(Manifest.permission.ACCESS_FINE_LOCATION) }, busy, error, searchResults,
-                                    onSearch = {
-                                        scope.launch {
-                                            busy = true
-                                            error = null
-                                            try { searchResults = searchPlaces(query) } 
-                                            catch (e: Exception) { error = e.message ?: "Errore" } 
-                                            finally { busy = false }
-                                        }
-                                    },
-                                    onPlaceSelected = { p ->
-                                        scope.launch {
-                                            busy = true
-                                            error = null
-                                            searchResults = emptyList()
-                                            place = p
-                                            try { route = fetchRoute(gps ?: error("Attendi GPS"), p) } 
-                                            catch (e: Exception) { error = e.message ?: "Errore" } 
-                                            finally { busy = false; isSearchExpanded = false }
-                                        }
-                                    },
+                                    onSearch = { scope.launch { busy = true; error = null; try { searchResults = searchPlaces(query) } catch (e: Exception) { error = e.message } finally { busy = false } } },
+                                    onPlaceSelected = { p -> scope.launch { busy = true; error = null; searchResults = emptyList(); place = p; try { route = fetchRoute(gps ?: error("Attendi GPS"), p) } catch (e: Exception) { error = e.message } finally { busy = false; isSearchExpanded = false } } },
                                     onClose = { isSearchExpanded = false }
                                 )
                             } else {
@@ -339,45 +295,70 @@ private fun App(client: FusedLocationProviderClient) {
     }
 }
 
-// --- COMPONENTI UI MODULARI E FLUTTUANTI (Senza bordi arrotondati) ---
+// --- LOGICA PARSING SAFETY DEVICES (V0.9) ---
+private fun loadSafetyDevices(context: Context): List<SafetyDevice> {
+    return try {
+        val jsonString = context.assets.open("safety_devices.demo.json").bufferedReader().use { it.readText() }
+        val list = mutableListOf<SafetyDevice>()
+        
+        // Tentativo 1: Formato GeoJSON standard
+        try {
+            val root = JSONObject(jsonString)
+            if (root.optString("type") == "FeatureCollection") {
+                val features = root.getJSONArray("features")
+                for (i in 0 until features.length()) {
+                    val f = features.getJSONObject(i)
+                    val geom = f.optJSONObject("geometry")
+                    if (geom != null && geom.optString("type") == "Point") {
+                        val coords = geom.getJSONArray("coordinates")
+                        val props = f.optJSONObject("properties")
+                        val type = props?.optString("type") ?: props?.optString("name") ?: "Segnalazione"
+                        list.add(SafetyDevice(coords.getDouble(1), coords.getDouble(0), type))
+                    }
+                }
+                return list
+            }
+        } catch (_: Exception) {}
+
+        // Tentativo 2: Fallback formato Array JSON semplice
+        val array = JSONArray(jsonString)
+        for (i in 0 until array.length()) {
+            val obj = array.getJSONObject(i)
+            val lat = obj.optDouble("lat", obj.optDouble("latitude", Double.NaN))
+            val lon = obj.optDouble("lon", obj.optDouble("longitude", Double.NaN))
+            val type = obj.optString("type", obj.optString("name", "Segnalazione"))
+            if (!lat.isNaN() && !lon.isNaN()) {
+                list.add(SafetyDevice(lat, lon, type))
+            }
+        }
+        list
+    } catch (e: Exception) {
+        emptyList()
+    }
+}
+
+// --- COMPONENTI UI MODULARI ---
 
 @Composable
 private fun TopStatusBar(gps: Location?, navigating: Boolean, muted: Boolean, onMuteToggle: () -> Unit) {
-    Surface(
-        color = CardSurface,
-        shape = RectangleShape,
-        modifier = Modifier.fillMaxWidth().shadow(8.dp, RectangleShape)
-    ) {
-        Row(
-            Modifier.fillMaxWidth().padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+    Surface(color = CardSurface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(8.dp, RectangleShape)) {
+        Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column {
-                Text("STRADASAFE", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text("STRADASAFE 0.9", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Text(
                     if (gps != null) "GPS Attivo (${gps.accuracy.roundToInt()}m)" else "Ricerca segnale GPS...",
                     color = if (gps != null) WazeGreen else AlertAmber,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium
+                    fontSize = 11.sp, fontWeight = FontWeight.Medium
                 )
             }
-            if (navigating) {
-                IconButton(onClick = onMuteToggle, modifier = Modifier.size(32.dp)) {
-                    Text(if (muted) "🔇" else "🔊", fontSize = 18.sp)
-                }
-            }
+            if (navigating) IconButton(onClick = onMuteToggle, modifier = Modifier.size(32.dp)) { Text(if (muted) "🔇" else "🔊", fontSize = 18.sp) }
         }
     }
 }
 
 @Composable
 private fun HomeBottomBar(onClick: () -> Unit) {
-    Surface(
-        color = CardSurface,
-        shape = RectangleShape,
-        modifier = Modifier.fillMaxWidth().shadow(8.dp, RectangleShape).clickable { onClick() }
-    ) {
+    Surface(color = CardSurface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(8.dp, RectangleShape).clickable { onClick() }) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("🔍", fontSize = 20.sp)
             Spacer(Modifier.width(12.dp))
@@ -392,59 +373,24 @@ private fun SearchExpandedCard(
     busy: Boolean, error: String?, results: List<Place>,
     onSearch: () -> Unit, onPlaceSelected: (Place) -> Unit, onClose: () -> Unit
 ) {
-    Surface(
-        color = CardSurface,
-        shape = RectangleShape,
-        modifier = Modifier.fillMaxWidth().shadow(16.dp, RectangleShape)
-    ) {
+    Surface(color = CardSurface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(16.dp, RectangleShape)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Cerca Luogo", color = TextWhite, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 TextButton(onClick = onClose) { Text("CHIUDI", color = AppleBlue) }
             }
-            
             OutlinedTextField(
-                value = query,
-                onValueChange = onQuery,
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                placeholder = { Text("Indirizzo o luogo...", color = TextGray) },
-                shape = RectangleShape,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = AppleBlue,
-                    unfocusedBorderColor = TextGray,
-                    focusedTextColor = TextWhite,
-                    unfocusedTextColor = TextWhite
-                )
+                value = query, onValueChange = onQuery, modifier = Modifier.fillMaxWidth(), singleLine = true,
+                placeholder = { Text("Indirizzo o luogo...", color = TextGray) }, shape = RectangleShape,
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = AppleBlue, unfocusedBorderColor = TextGray, focusedTextColor = TextWhite, unfocusedTextColor = TextWhite)
             )
-
-            if (!granted) {
-                Button(onClick = onGps, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue)) {
-                    Text("ATTIVA PERMESSO GPS", color = TextWhite, fontWeight = FontWeight.Bold)
-                }
-            }
-
-            Button(
-                onClick = onSearch,
-                enabled = query.length > 2 && granted && !busy,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RectangleShape,
-                colors = ButtonDefaults.buttonColors(containerColor = AppleBlue)
-            ) {
-                Text(if (busy) "CERCANDO..." else "CERCA", color = TextWhite, fontWeight = FontWeight.Bold)
-            }
-
+            if (!granted) Button(onClick = onGps, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue)) { Text("ATTIVA PERMESSO GPS", color = TextWhite, fontWeight = FontWeight.Bold) }
+            Button(onClick = onSearch, enabled = query.length > 2 && granted && !busy, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue)) { Text(if (busy) "CERCANDO..." else "CERCA", color = TextWhite, fontWeight = FontWeight.Bold) }
             error?.let { Text(it, color = AlertRed, fontSize = 13.sp) }
-
             if (results.isNotEmpty()) {
                 LazyColumn(Modifier.fillMaxWidth().heightIn(max = 220.dp)) {
                     items(results) { res ->
-                        TextButton(
-                            onClick = { onPlaceSelected(res) },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RectangleShape,
-                            contentPadding = PaddingValues(12.dp)
-                        ) {
+                        TextButton(onClick = { onPlaceSelected(res) }, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, contentPadding = PaddingValues(12.dp)) {
                             Text(res.name, color = TextWhite, maxLines = 2, fontSize = 14.sp, textAlign = TextAlign.Start, modifier = Modifier.fillMaxWidth())
                         }
                         HorizontalDivider(color = Color(0x33FFFFFF))
@@ -457,32 +403,16 @@ private fun SearchExpandedCard(
 
 @Composable
 private fun OverviewCard(route: RouteData, place: Place?, onStart: () -> Unit, onReset: () -> Unit) {
-    Surface(
-        color = CardSurface,
-        shape = RectangleShape,
-        modifier = Modifier.fillMaxWidth().shadow(16.dp, RectangleShape)
-    ) {
+    Surface(color = CardSurface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(16.dp, RectangleShape)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text(place?.name ?: "Destinazione", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 2)
-            
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column {
-                    Text("Distanza", color = TextGray, fontSize = 12.sp)
-                    Text("%.1f km".format(route.distance / 1000), color = WazeCyan, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text("Tempo stimato", color = TextGray, fontSize = 12.sp)
-                    Text("${(route.duration / 60).roundToInt()} min", color = WazeGreen, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                }
+                Column { Text("Distanza", color = TextGray, fontSize = 12.sp); Text("%.1f km".format(route.distance / 1000), color = WazeCyan, fontWeight = FontWeight.Bold, fontSize = 20.sp) }
+                Column(horizontalAlignment = Alignment.End) { Text("Tempo stimato", color = TextGray, fontSize = 12.sp); Text("${(route.duration / 60).roundToInt()} min", color = WazeGreen, fontWeight = FontWeight.Bold, fontSize = 20.sp) }
             }
-
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = onReset, Modifier.weight(1f), shape = RectangleShape, colors = ButtonDefaults.outlinedButtonColors(contentColor = TextWhite)) {
-                    Text("ANNULLA")
-                }
-                Button(onClick = onStart, Modifier.weight(1f), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue)) {
-                    Text("AVVIA GUIDA", color = TextWhite, fontWeight = FontWeight.Bold)
-                }
+                OutlinedButton(onClick = onReset, Modifier.weight(1f), shape = RectangleShape, colors = ButtonDefaults.outlinedButtonColors(contentColor = TextWhite)) { Text("ANNULLA") }
+                Button(onClick = onStart, Modifier.weight(1f), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue)) { Text("AVVIA GUIDA", color = TextWhite, fontWeight = FontWeight.Bold) }
             }
         }
     }
@@ -490,32 +420,13 @@ private fun OverviewCard(route: RouteData, place: Place?, onStart: () -> Unit, o
 
 @Composable
 private fun ManeuverCard(step: Step?, distanceToStep: Double) {
-    Surface(
-        color = CardSurface,
-        shape = RectangleShape,
-        modifier = Modifier.fillMaxWidth().shadow(12.dp, RectangleShape)
-    ) {
+    Surface(color = CardSurface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(12.dp, RectangleShape)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(12.dp)) {
-            Surface(shape = RectangleShape, color = AppleBlue, modifier = Modifier.size(64.dp)) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(getManifoldSymbol(step?.maneuver), fontSize = 36.sp, color = TextWhite)
-                }
-            }
+            Surface(shape = RectangleShape, color = AppleBlue, modifier = Modifier.size(64.dp)) { Box(contentAlignment = Alignment.Center) { Text(getManifoldSymbol(step?.maneuver), fontSize = 36.sp, color = TextWhite) } }
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
-                Text(
-                    if (distanceToStep.isNaN()) "..." else "${distanceToStep.roundToInt()} m",
-                    color = TextWhite,
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
-                Text(
-                    step?.text ?: "Prosegui dritto",
-                    color = WazeCyan,
-                    fontSize = 16.sp,
-                    maxLines = 2,
-                    fontWeight = FontWeight.Medium
-                )
+                Text(if (distanceToStep.isNaN()) "..." else "${distanceToStep.roundToInt()} m", color = TextWhite, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
+                Text(step?.text ?: "Prosegui dritto", color = WazeCyan, fontSize = 16.sp, maxLines = 2, fontWeight = FontWeight.Medium)
             }
         }
     }
@@ -527,26 +438,14 @@ private fun EtaCard(speed: Int, remainingDistance: Double, remainingDuration: Do
     val etaFormat = java.text.SimpleDateFormat("HH:mm", Locale.getDefault())
     val etaString = if (remainingDuration > 0) etaFormat.format(java.util.Date(etaMillis)) else "--:--"
 
-    Surface(
-        color = CardSurface,
-        shape = RectangleShape,
-        modifier = Modifier.fillMaxWidth().shadow(16.dp, RectangleShape)
-    ) {
+    Surface(color = CardSurface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(16.dp, RectangleShape)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 MetricDashboard("$speed", "KM/H", if (speed > 130) AlertRed else TextWhite)
                 MetricDashboard("%.1f".format(remainingDistance / 1000), "KM", TextWhite)
                 MetricDashboard(etaString, "ARRIVO", WazeGreen)
             }
-
-            Button(
-                onClick = onStop,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RectangleShape,
-                colors = ButtonDefaults.buttonColors(containerColor = AlertRed)
-            ) {
-                Text("TERMINA VIAGGIO", color = TextWhite, fontWeight = FontWeight.Bold)
-            }
+            Button(onClick = onStop, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AlertRed)) { Text("TERMINA VIAGGIO", color = TextWhite, fontWeight = FontWeight.Bold) }
         }
     }
 }
@@ -577,11 +476,7 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, follow
             mapView.apply {
                 onCreate(null)
                 getMapAsync { map ->
-                    map.cameraPosition = CameraPosition.Builder()
-                        .target(LatLng(44.4, 8.9))
-                        .zoom(8.3)
-                        .build()
-
+                    map.cameraPosition = CameraPosition.Builder().target(LatLng(44.4, 8.9)).zoom(8.3).build()
                     map.setStyle(Style.Builder().fromUri(STYLE_URL)) { s ->
                         s.addSource(GeoJsonSource("gps"))
                         s.addLayer(CircleLayer("gps-l", "gps").withProperties(circleRadius(10f), circleColor("#0A84FF"), circleStrokeColor("#FFFFFF"), circleStrokeWidth(3f)))
@@ -592,6 +487,10 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, follow
                         s.addSource(GeoJsonSource("route"))
                         s.addLayer(LineLayer("route-l", "route").withProperties(lineColor("#64D2FF"), lineWidth(8f)))
 
+                        // V0.9: Layer per i dispositivi di sicurezza
+                        s.addSource(GeoJsonSource("safety"))
+                        s.addLayer(CircleLayer("safety-l", "safety").withProperties(circleRadius(7f), circleColor("#FF453A"), circleStrokeColor("#FFFFFF"), circleStrokeWidth(2f)))
+
                         ready = true
                     }
                 }
@@ -601,6 +500,7 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, follow
             if (ready) v.getMapAsync { m ->
                 location?.let { m.style?.getSourceAs<GeoJsonSource>("gps")?.setGeoJson(Feature.fromGeometry(Point.fromLngLat(it.longitude, it.latitude))) }
                 place?.let { m.style?.getSourceAs<GeoJsonSource>("dest")?.setGeoJson(Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat))) }
+                
                 route?.let { r ->
                     m.style?.getSourceAs<GeoJsonSource>("route")?.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(r.points)))
                     if (!follow && !fitted) {
@@ -610,6 +510,13 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, follow
                         fitted = true
                     }
                 }
+
+                // Disegna i punti di sicurezza caricati nello stato
+                val safetyPoints = AppState.safetyDevices.value.map { Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) }
+                if (safetyPoints.isNotEmpty()) {
+                    m.style?.getSourceAs<GeoJsonSource>("safety")?.setGeoJson(FeatureCollection.fromFeatures(safetyPoints))
+                }
+
                 if (follow && location != null) {
                     m.cameraPosition = CameraPosition.Builder()
                         .target(LatLng(location.latitude, location.longitude))
@@ -626,11 +533,7 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, follow
     DisposableEffect(mapView) {
         mapView.onStart()
         mapView.onResume()
-        onDispose {
-            mapView.onPause()
-            mapView.onStop()
-            mapView.onDestroy()
-        }
+        onDispose { mapView.onPause(); mapView.onStop(); mapView.onDestroy() }
     }
 }
 
@@ -697,7 +600,7 @@ private fun instruction(type: String, mod: String, name: String): String {
 private fun get(address: String): String {
     val c = (URL(address).openConnection() as HttpURLConnection).apply {
         connectTimeout = 15000; readTimeout = 20000; requestMethod = "GET"
-        setRequestProperty("User-Agent", "StradaSafeLiguria/0.8 private prototype")
+        setRequestProperty("User-Agent", "StradaSafeLiguria/0.9 private prototype")
         setRequestProperty("Accept-Language", "it")
     }
     try {
