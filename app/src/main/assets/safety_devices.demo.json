@@ -1,17 +1,78 @@
 {
   "schema": 1,
   "territory": "Liguria",
-  "updated_at": "2026-09-25",
+  "updated_at": "2026-09-30",
   "status": "DEMO_ONLY",
   "devices": [
-    {
-      "id": "demo-ge-001",
-      "type": "fixed",
-      "lat": 44.407,
-      "lon": 8.934,
-      "direction_deg": 90,
-      "speed_limit": 50,
-      "source": "DEMO - NON UFFICIALE"
-    }
+    { "id": "tutor-ge-sopraelevata-ponente-start", "type": "Tutor", "lat": 44.40114, "lon": 8.94052, "speed_limit": 60 },
+    { "id": "tutor-ge-sopraelevata-ponente-end", "type": "Tutor", "lat": 44.40865, "lon": 8.90381, "speed_limit": 60 },
+    { "id": "tutor-ge-sopraelevata-levante-start", "type": "Tutor", "lat": 44.40875, "lon": 8.90391, "speed_limit": 60 },
+    { "id": "tutor-ge-sopraelevata-levante-end", "type": "Tutor", "lat": 44.40124, "lon": 8.94042, "speed_limit": 60 },
+    { "id": "tutor-ge-canepa-ponente-start", "type": "Tutor", "lat": 44.40825, "lon": 8.89901, "speed_limit": 70 },
+    { "id": "tutor-ge-canepa-ponente-end", "type": "Tutor", "lat": 44.41015, "lon": 8.88721, "speed_limit": 70 },
+    { "id": "tutor-ge-canepa-levante-start", "type": "Tutor", "lat": 44.41020, "lon": 8.88730, "speed_limit": 70 },
+    { "id": "tutor-ge-canepa-levante-end", "type": "Tutor", "lat": 44.40830, "lon": 8.89910, "speed_limit": 70 },
+    { "id": "tutor-ge-guidorossa-ponente-start", "type": "Tutor", "lat": 44.40938, "lon": 8.88377, "speed_limit": 70 },
+    { "id": "tutor-ge-guidorossa-ponente-end", "type": "Tutor", "lat": 44.41505, "lon": 8.85970, "speed_limit": 70 },
+
+    { "id": "velox-ge-europa-timavo", "type": "Autovelox Fisso", "lat": 44.40145, "lon": 8.97230, "speed_limit": 60 },
+    { "id": "velox-ge-europa-quarto", "type": "Autovelox Fisso", "lat": 44.38920, "lon": 8.99515, "speed_limit": 60 },
+    { "id": "velox-ge-brigate-partigiane", "type": "Autovelox Fisso", "lat": 44.39850, "lon": 8.94410, "speed_limit": 50 },
+    { "id": "velox-ge-adamoli", "type": "Autovelox Fisso", "lat": 44.44420, "lon": 8.97410, "speed_limit": 50 },
+    { "id": "velox-ge-pedulla", "type": "Autovelox Fisso", "lat": 44.45330, "lon": 8.99550, "speed_limit": 50 },
+    { "id": "velox-ge-don-sturzo", "type": "Autovelox Fisso", "lat": 44.39650, "lon": 8.96600, "speed_limit": 50 },
+    { "id": "velox-ge-monte-grappa", "type": "Autovelox Fisso", "lat": 44.41210, "lon": 8.94820, "speed_limit": 50 },
+
+    { "id": "tred-ge-cantore", "type": "Semaforo Controllato", "lat": 44.41005, "lon": 8.89505 },
+    { "id": "tred-ge-tolemaide", "type": "Semaforo Controllato", "lat": 44.40220, "lon": 8.95350 },
+    { "id": "tred-ge-isonzo", "type": "Semaforo Controllato", "lat": 44.39890, "lon": 8.97740 },
+    { "id": "tred-ge-cavallotti", "type": "Semaforo Controllato", "lat": 44.39050, "lon": 8.97520 },
+
+    { "id": "tutor-a10-celle-ponente-start", "type": "Tutor", "lat": 44.35415, "lon": 8.52835, "speed_limit": 110 },
+    { "id": "tutor-a10-albisola-ponente-end", "type": "Tutor", "lat": 44.33505, "lon": 8.50205, "speed_limit": 110 },
+    { "id": "tutor-a10-albisola-levante-start", "type": "Tutor", "lat": 44.33500, "lon": 8.50200, "speed_limit": 110 },
+    { "id": "tutor-a10-celle-levante-end", "type": "Tutor", "lat": 44.35410, "lon": 8.52830, "speed_limit": 110 },
+    
+    { "id": "tutor-a12-nervi-levante-start", "type": "Tutor", "lat": 44.38210, "lon": 9.04150, "speed_limit": 110 },
+    { "id": "tutor-a12-recco-levante-end", "type": "Tutor", "lat": 44.36720, "lon": 9.14120, "speed_limit": 110 },
+    { "id": "tutor-a12-rapallo-levante-start", "type": "Tutor", "lat": 44.34810, "lon": 9.21550, "speed_limit": 110 },
+    { "id": "tutor-a12-chiavari-levante-end", "type": "Tutor", "lat": 44.32920, "lon": 9.31750, "speed_limit": 110 },
+
+    { "id": "velox-a7-busalla", "type": "Autovelox Fisso", "lat": 44.57550, "lon": 8.95150, "speed_limit": 110 },
+    { "id": "velox-a7-isola-cantone", "type": "Autovelox Fisso", "lat": 44.63610, "lon": 8.96120, "speed_limit": 110 },
+    { "id": "velox-a26-masone", "type": "Autovelox Fisso", "lat": 44.51220, "lon": 8.69450, "speed_limit": 110 },
+
+    { "id": "velox-ss1-bogliasco", "type": "Autovelox Fisso", "lat": 44.38050, "lon": 9.06810, "speed_limit": 50 },
+    { "id": "velox-ss1-pieve", "type": "Autovelox Fisso", "lat": 44.37510, "lon": 9.08530, "speed_limit": 50 },
+    { "id": "velox-ss1-sori", "type": "Autovelox Fisso", "lat": 44.37120, "lon": 9.10250, "speed_limit": 50 },
+    { "id": "velox-ss1-recco", "type": "Autovelox Fisso", "lat": 44.36010, "lon": 9.14200, "speed_limit": 50 },
+    { "id": "velox-ss1-zoagli", "type": "Autovelox Fisso", "lat": 44.33850, "lon": 9.26420, "speed_limit": 50 },
+    { "id": "velox-ss1-sestri-levante", "type": "Autovelox Fisso", "lat": 44.27010, "lon": 9.40550, "speed_limit": 50 },
+    { "id": "velox-ss1-deiva", "type": "Autovelox Fisso", "lat": 44.22510, "lon": 9.51850, "speed_limit": 50 },
+
+    { "id": "velox-ss1-arenzano", "type": "Autovelox Fisso", "lat": 44.40210, "lon": 8.67550, "speed_limit": 50 },
+    { "id": "velox-ss1-cogoleto", "type": "Autovelox Fisso", "lat": 44.38820, "lon": 8.64120, "speed_limit": 50 },
+    { "id": "velox-ss1-varazze", "type": "Autovelox Fisso", "lat": 44.36150, "lon": 8.57520, "speed_limit": 50 },
+    { "id": "velox-nizza-savona", "type": "Autovelox Fisso", "lat": 44.28810, "lon": 8.45520, "speed_limit": 50 },
+    { "id": "velox-ss1-vado-ligure", "type": "Autovelox Fisso", "lat": 44.26210, "lon": 8.43550, "speed_limit": 50 },
+    { "id": "velox-ss1-spotorno", "type": "Autovelox Fisso", "lat": 44.22550, "lon": 8.41520, "speed_limit": 50 },
+    { "id": "velox-ss1-noli", "type": "Autovelox Fisso", "lat": 44.20510, "lon": 8.41450, "speed_limit": 50 },
+    { "id": "velox-ss1-varigotti", "type": "Autovelox Fisso", "lat": 44.18120, "lon": 8.38850, "speed_limit": 50 },
+    { "id": "velox-ss1-finale", "type": "Autovelox Fisso", "lat": 44.17050, "lon": 8.34150, "speed_limit": 50 },
+    { "id": "velox-ss1-pietra", "type": "Autovelox Fisso", "lat": 44.14810, "lon": 8.28520, "speed_limit": 50 },
+    { "id": "velox-ss1-loano", "type": "Autovelox Fisso", "lat": 44.12850, "lon": 8.25410, "speed_limit": 50 },
+    { "id": "velox-ss1-borghetto", "type": "Autovelox Fisso", "lat": 44.11050, "lon": 8.23450, "speed_limit": 50 },
+    { "id": "velox-ss1-ceriale", "type": "Autovelox Fisso", "lat": 44.08120, "lon": 8.22550, "speed_limit": 50 },
+    { "id": "velox-ss1-albenga", "type": "Autovelox Fisso", "lat": 44.04510, "lon": 8.21550, "speed_limit": 50 },
+    { "id": "velox-ss1-alassio", "type": "Autovelox Fisso", "lat": 44.01520, "lon": 8.16550, "speed_limit": 50 },
+    { "id": "velox-ss1-andora", "type": "Autovelox Fisso", "lat": 43.95120, "lon": 8.14050, "speed_limit": 50 },
+    { "id": "velox-ss1-cervo", "type": "Autovelox Fisso", "lat": 43.92550, "lon": 8.11550, "speed_limit": 50 },
+    { "id": "velox-ss1-diano", "type": "Autovelox Fisso", "lat": 43.90850, "lon": 8.08550, "speed_limit": 50 },
+    { "id": "velox-ss1-imperia", "type": "Autovelox Fisso", "lat": 43.88210, "lon": 8.03550, "speed_limit": 50 },
+    { "id": "velox-ss1-sanremo", "type": "Autovelox Fisso", "lat": 43.81550, "lon": 7.77550, "speed_limit": 50 },
+
+    { "id": "velox-sp-san-bartolomeo", "type": "Autovelox Fisso", "lat": 44.10250, "lon": 9.85120, "speed_limit": 50 },
+    { "id": "velox-sp-carducci", "type": "Autovelox Fisso", "lat": 44.11520, "lon": 9.83550, "speed_limit": 50 },
+    { "id": "velox-ss1-ricco-golfo", "type": "Autovelox Fisso", "lat": 44.15510, "lon": 9.76550, "speed_limit": 50 }
   ]
 }
