@@ -79,18 +79,18 @@ private const val STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
 private const val SEARCH_BASE = "https://nominatim.openstreetmap.org"
 private const val ROUTE_BASE = "https://router.project-osrm.org"
 
-// Stato globale persistente e raffinato (0.95)
 object AppState {
     val query = mutableStateOf("")
     val searchResults = mutableStateOf<List<Place>>(emptyList())
     val place = mutableStateOf<Place?>(null)
     val route = mutableStateOf<RouteData?>(null)
     val navigating = mutableStateOf(false)
-    val followUser = mutableStateOf(true) // Controllo Esplorazione Mappa
+    val followUser = mutableStateOf(true)
     val isSearchExpanded = mutableStateOf(false)
     val stepIndex = mutableIntStateOf(0)
     
     val safetyDevices = mutableStateOf<List<SafetyDevice>>(emptyList())
+    val activeSafetyDevices = mutableStateOf<List<SafetyDevice>>(emptyList()) // Filtro percors
     val alertedDevices = mutableSetOf<SafetyDevice>()
     
     val speedLimit = mutableStateOf<Int?>(null)
@@ -130,7 +130,7 @@ private fun rememberGps(client: FusedLocationProviderClient, granted: Boolean): 
         }
         val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000)
             .setMinUpdateIntervalMillis(1000)
-            .setMinUpdateDistanceMeters(1f) // Aumentata sensibilità
+            .setMinUpdateDistanceMeters(1f)
             .build()
         client.requestLocationUpdates(req, cb, null)
         onDispose { client.removeLocationUpdates(cb) }
@@ -222,7 +222,8 @@ private fun App(client: FusedLocationProviderClient) {
             lastSpoken = stepIndex
         }
 
-        val unalerted = AppState.safetyDevices.value.filter { it !in AppState.alertedDevices }
+        // Legge solo dalla lista filtrata (dispositivi fisicamente sul percorso)
+        val unalerted = AppState.activeSafetyDevices.value.filter { it !in AppState.alertedDevices }
         val nearbyDevice = unalerted.firstOrNull { distanceMeters(gps.latitude, gps.longitude, it.lat, it.lon) < 500 }
         
         if (nearbyDevice != null) {
@@ -255,14 +256,17 @@ private fun App(client: FusedLocationProviderClient) {
             }
         }
 
-        // V0.95 - Anti-Falso Ricalcolo: scatta solo se l'errore del GPS è accettabile (<40m) 
-        // ed evita ricalcoli pazzi in galleria.
         val offRoute = distanceToPolyline(gps.latitude, gps.longitude, route!!.points) > 50
         if (offRoute && gps.accuracy < 40f && currentTime - lastReroute > 10000) {
             lastReroute = currentTime
             scope.launch {
                 try {
-                    route = fetchRoute(gps, place!!)
+                    val newRoute = fetchRoute(gps, place!!)
+                    route = newRoute
+                    // Ricalcola i dispositivi attivi sulla nuova strada
+                    AppState.activeSafetyDevices.value = AppState.safetyDevices.value.filter {
+                        distanceToPolyline(it.lat, it.lon, newRoute.points) < 100.0
+                    }
                     stepIndex = 0; lastSpoken = -1
                     if (!muted && ttsReady) tts?.speak("Ricalcolo in corso", TextToSpeech.QUEUE_FLUSH, null, "reroute")
                 } catch (_: Exception) {}
@@ -273,13 +277,12 @@ private fun App(client: FusedLocationProviderClient) {
     MaterialTheme(colorScheme = darkColorScheme(primary = AppleBlue, background = DarkBackground, surface = CardSurface)) {
         Box(Modifier.fillMaxSize().background(DarkBackground)) {
             
-            // Sensore trasparente sovrapposto alla mappa per rilevare i tocchi liberi dell'utente
             Box(Modifier.fillMaxSize().pointerInput(Unit) {
                 awaitPointerEventScope {
                     while (true) {
                         val event = awaitPointerEvent(PointerEventPass.Initial)
                         if (event.changes.any { it.pressed } && navigating) {
-                            followUser = false // L'utente ha toccato la mappa, sgancia la telecamera
+                            followUser = false
                         }
                     }
                 }
@@ -287,7 +290,6 @@ private fun App(client: FusedLocationProviderClient) {
                 NavMap(gps, place, route, navigating, followUser, speed)
             }
 
-            // UI Principale
             Box(Modifier.fillMaxSize().systemBarsPadding().padding(16.dp)) {
                 if (isLandscape) {
                     Column(Modifier.fillMaxHeight().widthIn(max = 380.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -297,7 +299,10 @@ private fun App(client: FusedLocationProviderClient) {
                             ManeuverCard(currentStep, distanceToStep)
                             EtaCard(speed, speedLimit, AppState.inTutorZone.value, avgTutorSpeed, remainingDistance, remainingDuration, onStop = { resetNavigation() })
                         } else if (route != null) {
-                            OverviewCard(route!!, place, onStart = { navigating = true; isSearchExpanded = false; followUser = true }, onReset = { route = null; place = null })
+                            OverviewCard(route!!, place, onStart = {
+                                navigating = true; isSearchExpanded = false; followUser = true
+                                AppState.activeSafetyDevices.value = AppState.safetyDevices.value.filter { distanceToPolyline(it.lat, it.lon, route!!.points) < 100.0 }
+                            }, onReset = { route = null; place = null })
                         } else if (isSearchExpanded) {
                             SearchExpandedCard(query, { query = it }, granted, { ask.launch(Manifest.permission.ACCESS_FINE_LOCATION) }, busy, error, searchResults,
                                 onSearch = { scope.launch { busy = true; error = null; try { searchResults = searchPlaces(query) } catch (e: Exception) { error = e.message } finally { busy = false } } },
@@ -317,14 +322,8 @@ private fun App(client: FusedLocationProviderClient) {
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             
-                            // Bottone per ricentrare la mappa se l'utente l'ha sganciata esplorando
                             if (navigating && !followUser) {
-                                Button(
-                                    onClick = { followUser = true },
-                                    shape = RectangleShape,
-                                    colors = ButtonDefaults.buttonColors(containerColor = AppleBlue, contentColor = TextWhite),
-                                    modifier = Modifier.padding(bottom = 16.dp).shadow(8.dp)
-                                ) {
+                                Button(onClick = { followUser = true }, shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue, contentColor = TextWhite), modifier = Modifier.padding(bottom = 16.dp).shadow(8.dp)) {
                                     Text("📍 RICENTRA", fontWeight = FontWeight.Bold)
                                 }
                             }
@@ -332,7 +331,10 @@ private fun App(client: FusedLocationProviderClient) {
                             if (navigating && route != null) {
                                 EtaCard(speed, speedLimit, AppState.inTutorZone.value, avgTutorSpeed, remainingDistance, remainingDuration, onStop = { resetNavigation() })
                             } else if (route != null) {
-                                OverviewCard(route!!, place, onStart = { navigating = true; isSearchExpanded = false; followUser = true }, onReset = { route = null; place = null })
+                                OverviewCard(route!!, place, onStart = {
+                                    navigating = true; isSearchExpanded = false; followUser = true
+                                    AppState.activeSafetyDevices.value = AppState.safetyDevices.value.filter { distanceToPolyline(it.lat, it.lon, route!!.points) < 100.0 }
+                                }, onReset = { route = null; place = null })
                             } else if (isSearchExpanded) {
                                 SearchExpandedCard(query, { query = it }, granted, { ask.launch(Manifest.permission.ACCESS_FINE_LOCATION) }, busy, error, searchResults,
                                     onSearch = { scope.launch { busy = true; error = null; try { searchResults = searchPlaces(query) } catch (e: Exception) { error = e.message } finally { busy = false } } },
@@ -354,6 +356,7 @@ private fun resetNavigation() {
     AppState.navigating.value = false
     AppState.stepIndex.intValue = 0
     AppState.alertedDevices.clear()
+    AppState.activeSafetyDevices.value = emptyList() // Pulisce la lista attiva
     AppState.speedLimit.value = null
     AppState.inTutorZone.value = false
     AppState.followUser.value = true
@@ -580,7 +583,6 @@ private fun getManifoldSymbol(maneuver: String?): String = when (maneuver) {
     else -> "↑"
 }
 
-// MapView aggiornata alla V0.95: Smooth Camera & Auto-Zoom
 @Composable
 private fun NavMap(location: Location?, place: Place?, route: RouteData?, navigating: Boolean, followUser: Boolean, speed: Int) {
     val context = LocalContext.current
@@ -627,17 +629,21 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                     }
                 }
 
-                val safetyPoints = AppState.safetyDevices.value.map { Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) }
-                if (safetyPoints.isNotEmpty()) m.style?.getSourceAs<GeoJsonSource>("safety")?.setGeoJson(FeatureCollection.fromFeatures(safetyPoints))
+                // Invia alla mappa SOLO i dispositivi attivi calcolati (quelli sul percorso durante la navigazione)
+                val safetyPoints = if (navigating) {
+                    AppState.activeSafetyDevices.value.map { Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) }
+                } else {
+                    emptyList() // Mappa pulita se non si naviga
+                }
+                m.style?.getSourceAs<GeoJsonSource>("safety")?.setGeoJson(FeatureCollection.fromFeatures(safetyPoints))
 
-                // V0.95 - Telecamera Adattiva Smooth: Zoom e Tilt dipendono dalla velocità
                 if (navigating && followUser && location != null) {
                     val targetZoom = when {
-                        speed > 90 -> 15.0  // Zoom out autostrada
-                        speed > 50 -> 16.5  // Media velocità
-                        else -> 17.5        // Zoom in urbano o prossimità di svolta
+                        speed > 90 -> 15.0
+                        speed > 50 -> 16.5
+                        else -> 17.5
                     }
-                    val targetTilt = if (speed > 80) 60.0 else 45.0 // Inclina la visuale per vedere più in là in autostrada
+                    val targetTilt = if (speed > 80) 60.0 else 45.0
 
                     val pos = CameraPosition.Builder()
                         .target(LatLng(location.latitude, location.longitude))
@@ -646,7 +652,6 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                         .tilt(targetTilt)
                         .build()
                         
-                    // Animazione fluida di 1 secondo invece del teletrasporto brutale
                     m.animateCamera(CameraUpdateFactory.newCameraPosition(pos), 1000)
                 }
             }
