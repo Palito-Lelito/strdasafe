@@ -31,6 +31,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -304,7 +305,7 @@ private fun App(client: FusedLocationProviderClient) {
             Box(Modifier.fillMaxSize().systemBarsPadding().padding(16.dp)) {
                 if (isLandscape) {
                     Column(
-                        modifier = Modifier.fillMaxHeight().widthIn(max = 380.dp),
+                        modifier = Modifier.fillMaxHeight().widthIn(max = 340.dp), // Ridotta larghezza per più spazio mappa
                         verticalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column {
@@ -321,7 +322,7 @@ private fun App(client: FusedLocationProviderClient) {
                         Column(horizontalAlignment = Alignment.End) {
                             if (navigating && !followUser) {
                                 Button(onClick = { followUser = true }, shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue, contentColor = TextWhite), modifier = Modifier.padding(bottom = 16.dp).shadow(8.dp)) {
-                                    Text("📍 RICENTRA", fontWeight = FontWeight.Bold)
+                                    Text("📍 RICENTRA", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                 }
                             }
 
@@ -375,7 +376,7 @@ private fun App(client: FusedLocationProviderClient) {
                             
                             if (navigating && !followUser) {
                                 Button(onClick = { followUser = true }, shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue, contentColor = TextWhite), modifier = Modifier.padding(bottom = 16.dp).shadow(8.dp)) {
-                                    Text("📍 RICENTRA", fontWeight = FontWeight.Bold)
+                                    Text("📍 RICENTRA", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                 }
                             }
 
@@ -427,20 +428,16 @@ private fun resetNavigation() {
     AppState.speedLimit.value = null
     AppState.inTutorZone.value = false
     AppState.followUser.value = true
-    AppState.route.value = null  // Svuota il tracciato grafico
-    AppState.place.value = null  // Svuota il pin destinazione
+    AppState.route.value = null 
+    AppState.place.value = null 
 }
 
-// --- LOGICA PERSISTENZA CRONOLOGIA (SharedPreferences) ---
+// --- LOGICA PERSISTENZA CRONOLOGIA ---
 private fun saveHistory(context: Context, history: List<Place>) {
     val prefs = context.getSharedPreferences("StradaSafePrefs", Context.MODE_PRIVATE)
     val jsonArray = JSONArray()
     history.forEach { 
-        val obj = JSONObject().apply {
-            put("name", it.name)
-            put("lat", it.lat)
-            put("lon", it.lon)
-        }
+        val obj = JSONObject().apply { put("name", it.name); put("lat", it.lat); put("lon", it.lon) }
         jsonArray.put(obj)
     }
     prefs.edit().putString("search_history", jsonArray.toString()).apply()
@@ -466,7 +463,7 @@ private suspend fun fetchSpeedLimit(lat: Double, lon: Double): Int? = withContex
         val e = URLEncoder.encode(query, "UTF-8")
         val c = (URL("https://overpass-api.de/api/interpreter?data=$e").openConnection() as HttpURLConnection).apply {
             connectTimeout = 3000; readTimeout = 3000; requestMethod = "GET"
-            setRequestProperty("User-Agent", "StradaSafeLiguria/0.98")
+            setRequestProperty("User-Agent", "StradaSafeLiguria/0.99")
         }
         val res = c.inputStream.bufferedReader().use { it.readText() }
         val els = JSONObject(res).optJSONArray("elements") ?: return@withContext null
@@ -537,18 +534,18 @@ private fun loadSafetyDevices(context: Context): List<SafetyDevice> {
     } catch (e: Exception) { emptyList() }
 }
 
-// --- COMPONENTI UI ---
+// --- COMPONENTI UI CON FONT RIDIMENSIONATI ---
 
 @Composable
 private fun TopStatusBar(gps: Location?) {
     Surface(color = CardSurface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(8.dp, RectangleShape)) {
-        Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(10.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column {
-                Text("STRADASAFE 0.98", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text("STRADASAFE 0.99", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 Text(
                     if (gps != null) "GPS Attivo (${gps.accuracy.roundToInt()}m)" else "Ricerca segnale GPS...",
                     color = if (gps != null) WazeGreen else AlertAmber,
-                    fontSize = 11.sp, fontWeight = FontWeight.Medium
+                    fontSize = 10.sp, fontWeight = FontWeight.Medium
                 )
             }
         }
@@ -558,10 +555,10 @@ private fun TopStatusBar(gps: Location?) {
 @Composable
 private fun HomeBottomBar(onClick: () -> Unit) {
     Surface(color = CardSurface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(8.dp, RectangleShape).clickable { onClick() }) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("🔍", fontSize = 20.sp)
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("🔍", fontSize = 18.sp)
             Spacer(Modifier.width(12.dp))
-            Text("Cerca destinazione in Liguria...", color = TextGray, fontSize = 16.sp)
+            Text("Cerca destinazione in Liguria...", color = TextGray, fontSize = 14.sp)
         }
     }
 }
@@ -573,37 +570,37 @@ private fun SearchExpandedCard(
     onSearch: () -> Unit, onPlaceSelected: (Place) -> Unit, onClose: () -> Unit
 ) {
     Surface(color = CardSurface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(16.dp, RectangleShape)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Cerca Luogo", color = TextWhite, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                TextButton(onClick = onClose) { Text("CHIUDI", color = AppleBlue) }
+                Text("Cerca Luogo", color = TextWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                TextButton(onClick = onClose) { Text("CHIUDI", color = AppleBlue, fontSize = 13.sp) }
             }
             OutlinedTextField(
                 value = query, onValueChange = onQuery, modifier = Modifier.fillMaxWidth(), singleLine = true,
-                placeholder = { Text("Indirizzo o luogo...", color = TextGray) }, shape = RectangleShape,
+                placeholder = { Text("Indirizzo o luogo...", color = TextGray, fontSize = 13.sp) }, shape = RectangleShape,
                 colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = AppleBlue, unfocusedBorderColor = TextGray, focusedTextColor = TextWhite, unfocusedTextColor = TextWhite)
             )
-            if (!granted) Button(onClick = onGps, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue)) { Text("ATTIVA PERMESSO GPS", color = TextWhite, fontWeight = FontWeight.Bold) }
-            Button(onClick = onSearch, enabled = query.length > 2 && granted && !busy, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue)) { Text(if (busy) "CERCANDO..." else "CERCA", color = TextWhite, fontWeight = FontWeight.Bold) }
-            error?.let { Text(it, color = AlertRed, fontSize = 13.sp) }
+            if (!granted) Button(onClick = onGps, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue)) { Text("ATTIVA PERMESSO GPS", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+            Button(onClick = onSearch, enabled = query.length > 2 && granted && !busy, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue)) { Text(if (busy) "CERCANDO..." else "CERCA", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+            error?.let { Text(it, color = AlertRed, fontSize = 12.sp) }
             
             if (results.isNotEmpty()) {
-                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 220.dp)) {
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 200.dp)) {
                     items(results) { res ->
-                        TextButton(onClick = { onPlaceSelected(res) }, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, contentPadding = PaddingValues(12.dp)) {
-                            Text(res.name, color = TextWhite, maxLines = 2, fontSize = 14.sp, textAlign = TextAlign.Start, modifier = Modifier.fillMaxWidth())
+                        TextButton(onClick = { onPlaceSelected(res) }, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, contentPadding = PaddingValues(10.dp)) {
+                            Text(res.name, color = TextWhite, maxLines = 2, fontSize = 13.sp, textAlign = TextAlign.Start, modifier = Modifier.fillMaxWidth())
                         }
                         HorizontalDivider(color = Color(0x33FFFFFF))
                     }
                 }
             } else if (query.isEmpty() && history.isNotEmpty()) {
-                Text("CRONOLOGIA RECENTE", color = TextGray, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
-                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 220.dp)) {
+                Text("CRONOLOGIA RECENTE", color = TextGray, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp))
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 200.dp)) {
                     items(history) { res ->
-                        TextButton(onClick = { onPlaceSelected(res) }, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, contentPadding = PaddingValues(12.dp)) {
+                        TextButton(onClick = { onPlaceSelected(res) }, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, contentPadding = PaddingValues(10.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                Text("🕒", fontSize = 16.sp, modifier = Modifier.padding(end = 12.dp))
-                                Text(res.name, color = TextWhite, maxLines = 2, fontSize = 14.sp, textAlign = TextAlign.Start, modifier = Modifier.fillMaxWidth())
+                                Text("🕒", fontSize = 14.sp, modifier = Modifier.padding(end = 10.dp))
+                                Text(res.name, color = TextWhite, maxLines = 2, fontSize = 13.sp, textAlign = TextAlign.Start, modifier = Modifier.fillMaxWidth())
                             }
                         }
                         HorizontalDivider(color = Color(0x33FFFFFF))
@@ -617,15 +614,15 @@ private fun SearchExpandedCard(
 @Composable
 private fun OverviewCard(route: RouteData, place: Place?, onStart: () -> Unit, onReset: () -> Unit) {
     Surface(color = CardSurface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(16.dp, RectangleShape)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text(place?.name ?: "Destinazione", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 2)
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(place?.name ?: "Destinazione", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 2)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column { Text("Distanza", color = TextGray, fontSize = 12.sp); Text("%.1f km".format(route.distance / 1000), color = WazeCyan, fontWeight = FontWeight.Bold, fontSize = 20.sp) }
-                Column(horizontalAlignment = Alignment.End) { Text("Tempo stimato", color = TextGray, fontSize = 12.sp); Text("${(route.duration / 60).roundToInt()} min", color = WazeGreen, fontWeight = FontWeight.Bold, fontSize = 20.sp) }
+                Column { Text("Distanza", color = TextGray, fontSize = 11.sp); Text("%.1f km".format(route.distance / 1000), color = WazeCyan, fontWeight = FontWeight.Bold, fontSize = 18.sp) }
+                Column(horizontalAlignment = Alignment.End) { Text("Tempo stimato", color = TextGray, fontSize = 11.sp); Text("${(route.duration / 60).roundToInt()} min", color = WazeGreen, fontWeight = FontWeight.Bold, fontSize = 18.sp) }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = onReset, Modifier.weight(1f), shape = RectangleShape, colors = ButtonDefaults.outlinedButtonColors(contentColor = TextWhite)) { Text("ANNULLA") }
-                Button(onClick = onStart, Modifier.weight(1f), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue)) { Text("AVVIA GUIDA", color = TextWhite, fontWeight = FontWeight.Bold) }
+                OutlinedButton(onClick = onReset, Modifier.weight(1f), shape = RectangleShape, colors = ButtonDefaults.outlinedButtonColors(contentColor = TextWhite)) { Text("ANNULLA", fontSize = 13.sp) }
+                Button(onClick = onStart, Modifier.weight(1f), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue)) { Text("AVVIA GUIDA", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
             }
         }
     }
@@ -634,15 +631,15 @@ private fun OverviewCard(route: RouteData, place: Place?, onStart: () -> Unit, o
 @Composable
 private fun ManeuverCard(step: Step?, distanceToStep: Double, muted: Boolean, onMuteToggle: () -> Unit) {
     Surface(color = CardSurface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(12.dp, RectangleShape)) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(12.dp)) {
-            Surface(shape = RectangleShape, color = AppleBlue, modifier = Modifier.size(64.dp)) { Box(contentAlignment = Alignment.Center) { Text(getManifoldSymbol(step?.maneuver), fontSize = 36.sp, color = TextWhite) } }
-            Spacer(Modifier.width(16.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(10.dp)) {
+            Surface(shape = RectangleShape, color = AppleBlue, modifier = Modifier.size(54.dp)) { Box(contentAlignment = Alignment.Center) { Text(getManifoldSymbol(step?.maneuver), fontSize = 30.sp, color = TextWhite) } }
+            Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(if (distanceToStep.isNaN()) "..." else "${distanceToStep.roundToInt()} m", color = TextWhite, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
-                Text(step?.text ?: "Prosegui", color = WazeCyan, fontSize = 16.sp, maxLines = 2, fontWeight = FontWeight.Medium)
+                Text(if (distanceToStep.isNaN()) "..." else "${distanceToStep.roundToInt()} m", color = TextWhite, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+                Text(step?.text ?: "Prosegui", color = WazeCyan, fontSize = 14.sp, maxLines = 2, fontWeight = FontWeight.Medium)
             }
-            IconButton(onClick = onMuteToggle, modifier = Modifier.size(48.dp)) {
-                Text(if (muted) "🔇" else "🔊", fontSize = 24.sp)
+            IconButton(onClick = onMuteToggle, modifier = Modifier.size(40.dp)) {
+                Text(if (muted) "🔇" else "🔊", fontSize = 20.sp)
             }
         }
     }
@@ -666,20 +663,20 @@ private fun EtaCard(
         shape = RectangleShape, 
         modifier = Modifier.fillMaxWidth().shadow(16.dp, RectangleShape).clickable { onCardClick() }
     ) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     MetricDashboard("$speed", "KM/H", speedColor)
                     if (speedLimit != null) {
-                        Surface(shape = RectangleShape, color = TextWhite, border = BorderStroke(3.dp, AlertRed), modifier = Modifier.size(36.dp)) {
-                            Box(contentAlignment = Alignment.Center) { Text("$speedLimit", color = DarkBackground, fontWeight = FontWeight.Bold, fontSize = 14.sp) }
+                        Surface(shape = RectangleShape, color = TextWhite, border = BorderStroke(2.dp, AlertRed), modifier = Modifier.size(32.dp)) {
+                            Box(contentAlignment = Alignment.Center) { Text("$speedLimit", color = DarkBackground, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
                         }
                     }
                     if (inTutorZone) {
                         val isAvgSpeeding = speedLimit != null && avgTutorSpeed > speedLimit
                         val avgColor = if (isAvgSpeeding) AlertRed else AlertAmber
-                        Surface(shape = RectangleShape, color = Color(0x33FF9F0A), modifier = Modifier.padding(start = 8.dp)) { MetricDashboard("$avgTutorSpeed", "MEDIA", avgColor, modifier = Modifier.padding(horizontal = 8.dp)) }
+                        Surface(shape = RectangleShape, color = Color(0x33FF9F0A), modifier = Modifier.padding(start = 6.dp)) { MetricDashboard("$avgTutorSpeed", "MEDIA", avgColor, modifier = Modifier.padding(horizontal = 6.dp)) }
                     }
                 }
                 
@@ -689,7 +686,7 @@ private fun EtaCard(
             
             if (showStopButton) {
                 Button(onClick = onStop, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AlertRed)) { 
-                    Text("TERMINA VIAGGIO", color = TextWhite, fontWeight = FontWeight.Bold) 
+                    Text("TERMINA VIAGGIO", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 13.sp) 
                 }
             }
         }
@@ -698,8 +695,8 @@ private fun EtaCard(
 
 @Composable
 private fun MetricDashboard(value: String, unit: String, color: Color, modifier: Modifier = Modifier) = Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-    Text(value, color = color, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
-    Text(unit, color = TextGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+    Text(value, color = color, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+    Text(unit, color = TextGray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
 }
 
 private fun getManifoldSymbol(maneuver: String?): String = when (maneuver) {
@@ -710,12 +707,20 @@ private fun getManifoldSymbol(maneuver: String?): String = when (maneuver) {
     else -> "↑"
 }
 
+// LOGICA PADDING: Sposta il centro visivo della mappa dinamicamente
 @Composable
 private fun NavMap(location: Location?, place: Place?, route: RouteData?, navigating: Boolean, followUser: Boolean, speed: Int) {
     val context = LocalContext.current
+    val density = LocalDensity.current
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val mapView = remember { MapView(context) }
     var ready by remember { mutableStateOf(false) }
     var fitted by remember { mutableStateOf(false) }
+
+    // Calcolo dinamico del padding per "scansare" i pannelli UI neri
+    val paddingLeft = if (isLandscape && navigating) with(density) { 360.dp.toPx().toInt() } else 0
+    val paddingTop = if (!isLandscape && navigating) with(density) { 100.dp.toPx().toInt() } else 0
+    val paddingBottom = if (!isLandscape && navigating) with(density) { 140.dp.toPx().toInt() } else 0
 
     AndroidView(
         factory = {
@@ -743,16 +748,18 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
         },
         update = { v ->
             if (ready) v.getMapAsync { m ->
+                
+                // Sposta il centro della mappa verso lo spazio visibile libero
+                m.setPadding(paddingLeft, paddingTop, 0, paddingBottom)
+
                 location?.let { m.style?.getSourceAs<GeoJsonSource>("gps")?.setGeoJson(Feature.fromGeometry(Point.fromLngLat(it.longitude, it.latitude))) }
                 
-                // Pulizia o Disegno Destinazione
                 if (place != null) {
                     m.style?.getSourceAs<GeoJsonSource>("dest")?.setGeoJson(Feature.fromGeometry(Point.fromLngLat(place.lon, place.lat)))
                 } else {
                     m.style?.getSourceAs<GeoJsonSource>("dest")?.setGeoJson(FeatureCollection.fromFeatures(emptyArray<Feature>()))
                 }
                 
-                // Pulizia o Disegno Linea Percorso
                 if (route != null) {
                     m.style?.getSourceAs<GeoJsonSource>("route")?.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(route.points)))
                     if (!navigating && !fitted) {
@@ -766,7 +773,6 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                     fitted = false
                 }
 
-                // Disegno Velox sul percorso
                 val safetyPoints = if (navigating) {
                     AppState.activeSafetyDevices.value.map { Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) }
                 } else {
@@ -774,7 +780,6 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                 }
                 m.style?.getSourceAs<GeoJsonSource>("safety")?.setGeoJson(FeatureCollection.fromFeatures(safetyPoints))
 
-                // Telecamera Adattiva
                 if (navigating && followUser && location != null) {
                     val targetZoom = when {
                         speed > 90 -> 15.0
@@ -866,7 +871,7 @@ private fun instruction(type: String, mod: String, name: String): String {
 private fun get(address: String): String {
     val c = (URL(address).openConnection() as HttpURLConnection).apply {
         connectTimeout = 15000; readTimeout = 20000; requestMethod = "GET"
-        setRequestProperty("User-Agent", "StradaSafeLiguria/0.98")
+        setRequestProperty("User-Agent", "StradaSafeLiguria/0.99")
         setRequestProperty("Accept-Language", "it")
     }
     try {
