@@ -1,29 +1,38 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="it.stradasafe.liguria">
+
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-
-    <queries>
-        <intent>
-            <action android:name="android.intent.action.TTS_SERVICE" />
-        </intent>
-    </queries>
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- NUOVI PERMESSI PER IL BACKGROUND 1.0 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
-        android:allowBackup="false"
-        android:label="StradaSafe Liguria"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="StradaSafe"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.StradaSafe">
+        
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:theme="@style/Theme.StradaSafe">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- DICHIARAZIONE DEL SERVIZIO IN BACKGROUND -->
+        <service
+            android:name=".NavigationService"
+            android:foregroundServiceType="location"
+            android:exported="false" />
+            
     </application>
 </manifest>
