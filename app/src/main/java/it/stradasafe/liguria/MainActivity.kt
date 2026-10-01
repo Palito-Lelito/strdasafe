@@ -90,7 +90,7 @@ object AppState {
     val stepIndex = mutableIntStateOf(0)
     
     val safetyDevices = mutableStateOf<List<SafetyDevice>>(emptyList())
-    val activeSafetyDevices = mutableStateOf<List<SafetyDevice>>(emptyList()) // Filtro percors
+    val activeSafetyDevices = mutableStateOf<List<SafetyDevice>>(emptyList()) // Filtro dispositivi sul percorso
     val alertedDevices = mutableSetOf<SafetyDevice>()
     
     val speedLimit = mutableStateOf<Int?>(null)
@@ -222,7 +222,6 @@ private fun App(client: FusedLocationProviderClient) {
             lastSpoken = stepIndex
         }
 
-        // Legge solo dalla lista filtrata (dispositivi fisicamente sul percorso)
         val unalerted = AppState.activeSafetyDevices.value.filter { it !in AppState.alertedDevices }
         val nearbyDevice = unalerted.firstOrNull { distanceMeters(gps.latitude, gps.longitude, it.lat, it.lon) < 500 }
         
@@ -263,7 +262,6 @@ private fun App(client: FusedLocationProviderClient) {
                 try {
                     val newRoute = fetchRoute(gps, place!!)
                     route = newRoute
-                    // Ricalcola i dispositivi attivi sulla nuova strada
                     AppState.activeSafetyDevices.value = AppState.safetyDevices.value.filter {
                         distanceToPolyline(it.lat, it.lon, newRoute.points) < 100.0
                     }
@@ -293,10 +291,14 @@ private fun App(client: FusedLocationProviderClient) {
             Box(Modifier.fillMaxSize().systemBarsPadding().padding(16.dp)) {
                 if (isLandscape) {
                     Column(Modifier.fillMaxHeight().widthIn(max = 380.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        TopStatusBar(gps, navigating, muted, onMuteToggle = { muted = !muted })
+                        
+                        // Barra superiore visibile SOLO se NON siamo in navigazione
+                        if (!navigating) {
+                            TopStatusBar(gps)
+                        }
                         
                         if (navigating && route != null) {
-                            ManeuverCard(currentStep, distanceToStep)
+                            ManeuverCard(currentStep, distanceToStep, muted, onMuteToggle = { muted = !muted })
                             EtaCard(speed, speedLimit, AppState.inTutorZone.value, avgTutorSpeed, remainingDistance, remainingDuration, onStop = { resetNavigation() })
                         } else if (route != null) {
                             OverviewCard(route!!, place, onStart = {
@@ -316,9 +318,15 @@ private fun App(client: FusedLocationProviderClient) {
                 } else {
                     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
                         Column {
-                            TopStatusBar(gps, navigating, muted, onMuteToggle = { muted = !muted })
-                            Spacer(Modifier.height(10.dp))
-                            if (navigating && route != null) ManeuverCard(currentStep, distanceToStep)
+                            // Barra superiore visibile SOLO se NON siamo in navigazione
+                            if (!navigating) {
+                                TopStatusBar(gps)
+                                Spacer(Modifier.height(10.dp))
+                            }
+                            
+                            if (navigating && route != null) {
+                                ManeuverCard(currentStep, distanceToStep, muted, onMuteToggle = { muted = !muted })
+                            }
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             
@@ -356,7 +364,7 @@ private fun resetNavigation() {
     AppState.navigating.value = false
     AppState.stepIndex.intValue = 0
     AppState.alertedDevices.clear()
-    AppState.activeSafetyDevices.value = emptyList() // Pulisce la lista attiva
+    AppState.activeSafetyDevices.value = emptyList()
     AppState.speedLimit.value = null
     AppState.inTutorZone.value = false
     AppState.followUser.value = true
@@ -368,7 +376,7 @@ private suspend fun fetchSpeedLimit(lat: Double, lon: Double): Int? = withContex
         val e = URLEncoder.encode(query, "UTF-8")
         val c = (URL("https://overpass-api.de/api/interpreter?data=$e").openConnection() as HttpURLConnection).apply {
             connectTimeout = 3000; readTimeout = 3000; requestMethod = "GET"
-            setRequestProperty("User-Agent", "StradaSafeLiguria/0.95")
+            setRequestProperty("User-Agent", "StradaSafeLiguria/0.96")
         }
         val res = c.inputStream.bufferedReader().use { it.readText() }
         val els = JSONObject(res).optJSONArray("elements") ?: return@withContext null
@@ -442,18 +450,17 @@ private fun loadSafetyDevices(context: Context): List<SafetyDevice> {
 // --- COMPONENTI UI ---
 
 @Composable
-private fun TopStatusBar(gps: Location?, navigating: Boolean, muted: Boolean, onMuteToggle: () -> Unit) {
+private fun TopStatusBar(gps: Location?) {
     Surface(color = CardSurface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(8.dp, RectangleShape)) {
         Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column {
-                Text("STRADASAFE 0.95 RC", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text("STRADASAFE 0.96", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Text(
                     if (gps != null) "GPS Attivo (${gps.accuracy.roundToInt()}m)" else "Ricerca segnale GPS...",
                     color = if (gps != null) WazeGreen else AlertAmber,
                     fontSize = 11.sp, fontWeight = FontWeight.Medium
                 )
             }
-            if (navigating) IconButton(onClick = onMuteToggle, modifier = Modifier.size(32.dp)) { Text(if (muted) "🔇" else "🔊", fontSize = 18.sp) }
         }
     }
 }
@@ -521,7 +528,7 @@ private fun OverviewCard(route: RouteData, place: Place?, onStart: () -> Unit, o
 }
 
 @Composable
-private fun ManeuverCard(step: Step?, distanceToStep: Double) {
+private fun ManeuverCard(step: Step?, distanceToStep: Double, muted: Boolean, onMuteToggle: () -> Unit) {
     Surface(color = CardSurface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(12.dp, RectangleShape)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(12.dp)) {
             Surface(shape = RectangleShape, color = AppleBlue, modifier = Modifier.size(64.dp)) { Box(contentAlignment = Alignment.Center) { Text(getManifoldSymbol(step?.maneuver), fontSize = 36.sp, color = TextWhite) } }
@@ -529,6 +536,10 @@ private fun ManeuverCard(step: Step?, distanceToStep: Double) {
             Column(Modifier.weight(1f)) {
                 Text(if (distanceToStep.isNaN()) "..." else "${distanceToStep.roundToInt()} m", color = TextWhite, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
                 Text(step?.text ?: "Prosegui", color = WazeCyan, fontSize = 16.sp, maxLines = 2, fontWeight = FontWeight.Medium)
+            }
+            // Tasto Mute integrato elegantemente a destra
+            IconButton(onClick = onMuteToggle, modifier = Modifier.size(48.dp)) {
+                Text(if (muted) "🔇" else "🔊", fontSize = 24.sp)
             }
         }
     }
@@ -629,11 +640,10 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                     }
                 }
 
-                // Invia alla mappa SOLO i dispositivi attivi calcolati (quelli sul percorso durante la navigazione)
                 val safetyPoints = if (navigating) {
                     AppState.activeSafetyDevices.value.map { Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) }
                 } else {
-                    emptyList() // Mappa pulita se non si naviga
+                    emptyList()
                 }
                 m.style?.getSourceAs<GeoJsonSource>("safety")?.setGeoJson(FeatureCollection.fromFeatures(safetyPoints))
 
@@ -728,7 +738,7 @@ private fun instruction(type: String, mod: String, name: String): String {
 private fun get(address: String): String {
     val c = (URL(address).openConnection() as HttpURLConnection).apply {
         connectTimeout = 15000; readTimeout = 20000; requestMethod = "GET"
-        setRequestProperty("User-Agent", "StradaSafeLiguria/0.95 RC")
+        setRequestProperty("User-Agent", "StradaSafeLiguria/0.96")
         setRequestProperty("Accept-Language", "it")
     }
     try {
