@@ -27,6 +27,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -77,25 +79,23 @@ private const val STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
 private const val SEARCH_BASE = "https://nominatim.openstreetmap.org"
 private const val ROUTE_BASE = "https://router.project-osrm.org"
 
-// Stato globale persistente
+// Stato globale persistente e raffinato (0.95)
 object AppState {
     val query = mutableStateOf("")
     val searchResults = mutableStateOf<List<Place>>(emptyList())
     val place = mutableStateOf<Place?>(null)
     val route = mutableStateOf<RouteData?>(null)
     val navigating = mutableStateOf(false)
+    val followUser = mutableStateOf(true) // Controllo Esplorazione Mappa
     val isSearchExpanded = mutableStateOf(false)
     val stepIndex = mutableIntStateOf(0)
     
-    // Safety Devices
     val safetyDevices = mutableStateOf<List<SafetyDevice>>(emptyList())
     val alertedDevices = mutableSetOf<SafetyDevice>()
     
-    // Limiti di velocità
     val speedLimit = mutableStateOf<Int?>(null)
     val lastSpeedLimitCheck = mutableLongStateOf(0L)
 
-    // Modalità Tutor (Velocità Media)
     val inTutorZone = mutableStateOf(false)
     val tutorStartTime = mutableLongStateOf(0L)
     val tutorStartDistanceRemaining = mutableDoubleStateOf(0.0)
@@ -129,8 +129,8 @@ private fun rememberGps(client: FusedLocationProviderClient, granted: Boolean): 
             }
         }
         val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000)
-            .setMinUpdateIntervalMillis(500)
-            .setMinUpdateDistanceMeters(2f)
+            .setMinUpdateIntervalMillis(1000)
+            .setMinUpdateDistanceMeters(1f) // Aumentata sensibilità
             .build()
         client.requestLocationUpdates(req, cb, null)
         onDispose { client.removeLocationUpdates(cb) }
@@ -153,10 +153,7 @@ private fun rememberSpeaker(): Pair<TextToSpeech?, Boolean> {
             }
         }
         tts = engine
-        onDispose {
-            engine?.stop()
-            engine?.shutdown()
-        }
+        onDispose { engine?.stop(); engine?.shutdown() }
     }
     return tts to ready
 }
@@ -178,6 +175,7 @@ private fun App(client: FusedLocationProviderClient) {
     var place by AppState.place
     var route by AppState.route
     var navigating by AppState.navigating
+    var followUser by AppState.followUser
     var isSearchExpanded by AppState.isSearchExpanded
     var stepIndex by AppState.stepIndex
     var speedLimit by AppState.speedLimit
@@ -257,14 +255,16 @@ private fun App(client: FusedLocationProviderClient) {
             }
         }
 
-        val offRoute = distanceToPolyline(gps.latitude, gps.longitude, route!!.points) > 75
-        if (offRoute && currentTime - lastReroute > 15000) {
+        // V0.95 - Anti-Falso Ricalcolo: scatta solo se l'errore del GPS è accettabile (<40m) 
+        // ed evita ricalcoli pazzi in galleria.
+        val offRoute = distanceToPolyline(gps.latitude, gps.longitude, route!!.points) > 50
+        if (offRoute && gps.accuracy < 40f && currentTime - lastReroute > 10000) {
             lastReroute = currentTime
             scope.launch {
                 try {
                     route = fetchRoute(gps, place!!)
                     stepIndex = 0; lastSpoken = -1
-                    if (!muted && ttsReady) tts?.speak("Ricalcolo del percorso", TextToSpeech.QUEUE_FLUSH, null, "reroute")
+                    if (!muted && ttsReady) tts?.speak("Ricalcolo in corso", TextToSpeech.QUEUE_FLUSH, null, "reroute")
                 } catch (_: Exception) {}
             }
         }
@@ -272,17 +272,32 @@ private fun App(client: FusedLocationProviderClient) {
 
     MaterialTheme(colorScheme = darkColorScheme(primary = AppleBlue, background = DarkBackground, surface = CardSurface)) {
         Box(Modifier.fillMaxSize().background(DarkBackground)) {
-            NavMap(gps, place, route, navigating)
+            
+            // Sensore trasparente sovrapposto alla mappa per rilevare i tocchi liberi dell'utente
+            Box(Modifier.fillMaxSize().pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        if (event.changes.any { it.pressed } && navigating) {
+                            followUser = false // L'utente ha toccato la mappa, sgancia la telecamera
+                        }
+                    }
+                }
+            }) {
+                NavMap(gps, place, route, navigating, followUser, speed)
+            }
 
+            // UI Principale
             Box(Modifier.fillMaxSize().systemBarsPadding().padding(16.dp)) {
                 if (isLandscape) {
                     Column(Modifier.fillMaxHeight().widthIn(max = 380.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         TopStatusBar(gps, navigating, muted, onMuteToggle = { muted = !muted })
+                        
                         if (navigating && route != null) {
                             ManeuverCard(currentStep, distanceToStep)
                             EtaCard(speed, speedLimit, AppState.inTutorZone.value, avgTutorSpeed, remainingDistance, remainingDuration, onStop = { resetNavigation() })
                         } else if (route != null) {
-                            OverviewCard(route!!, place, onStart = { navigating = true; isSearchExpanded = false }, onReset = { route = null; place = null })
+                            OverviewCard(route!!, place, onStart = { navigating = true; isSearchExpanded = false; followUser = true }, onReset = { route = null; place = null })
                         } else if (isSearchExpanded) {
                             SearchExpandedCard(query, { query = it }, granted, { ask.launch(Manifest.permission.ACCESS_FINE_LOCATION) }, busy, error, searchResults,
                                 onSearch = { scope.launch { busy = true; error = null; try { searchResults = searchPlaces(query) } catch (e: Exception) { error = e.message } finally { busy = false } } },
@@ -300,11 +315,24 @@ private fun App(client: FusedLocationProviderClient) {
                             Spacer(Modifier.height(10.dp))
                             if (navigating && route != null) ManeuverCard(currentStep, distanceToStep)
                         }
-                        Column {
+                        Column(horizontalAlignment = Alignment.End) {
+                            
+                            // Bottone per ricentrare la mappa se l'utente l'ha sganciata esplorando
+                            if (navigating && !followUser) {
+                                Button(
+                                    onClick = { followUser = true },
+                                    shape = RectangleShape,
+                                    colors = ButtonDefaults.buttonColors(containerColor = AppleBlue, contentColor = TextWhite),
+                                    modifier = Modifier.padding(bottom = 16.dp).shadow(8.dp)
+                                ) {
+                                    Text("📍 RICENTRA", fontWeight = FontWeight.Bold)
+                                }
+                            }
+
                             if (navigating && route != null) {
                                 EtaCard(speed, speedLimit, AppState.inTutorZone.value, avgTutorSpeed, remainingDistance, remainingDuration, onStop = { resetNavigation() })
                             } else if (route != null) {
-                                OverviewCard(route!!, place, onStart = { navigating = true; isSearchExpanded = false }, onReset = { route = null; place = null })
+                                OverviewCard(route!!, place, onStart = { navigating = true; isSearchExpanded = false; followUser = true }, onReset = { route = null; place = null })
                             } else if (isSearchExpanded) {
                                 SearchExpandedCard(query, { query = it }, granted, { ask.launch(Manifest.permission.ACCESS_FINE_LOCATION) }, busy, error, searchResults,
                                     onSearch = { scope.launch { busy = true; error = null; try { searchResults = searchPlaces(query) } catch (e: Exception) { error = e.message } finally { busy = false } } },
@@ -328,16 +356,16 @@ private fun resetNavigation() {
     AppState.alertedDevices.clear()
     AppState.speedLimit.value = null
     AppState.inTutorZone.value = false
+    AppState.followUser.value = true
 }
 
-// --- LOGICA OVERPASS API ---
 private suspend fun fetchSpeedLimit(lat: Double, lon: Double): Int? = withContext(Dispatchers.IO) {
     try {
         val query = "[out:json][timeout:3];way(around:20,$lat,$lon)[\"maxspeed\"];out tags;"
         val e = URLEncoder.encode(query, "UTF-8")
         val c = (URL("https://overpass-api.de/api/interpreter?data=$e").openConnection() as HttpURLConnection).apply {
             connectTimeout = 3000; readTimeout = 3000; requestMethod = "GET"
-            setRequestProperty("User-Agent", "StradaSafeLiguria/0.92")
+            setRequestProperty("User-Agent", "StradaSafeLiguria/0.95")
         }
         val res = c.inputStream.bufferedReader().use { it.readText() }
         val els = JSONObject(res).optJSONArray("elements") ?: return@withContext null
@@ -358,13 +386,11 @@ private suspend fun fetchSpeedLimit(lat: Double, lon: Double): Int? = withContex
     null
 }
 
-// --- LOGICA PARSING SAFETY DEVICES (Aggiornata per Schema 1) ---
 private fun loadSafetyDevices(context: Context): List<SafetyDevice> {
     return try {
         val jsonString = context.assets.open("safety_devices.demo.json").bufferedReader().use { it.readText() }
         val list = mutableListOf<SafetyDevice>()
         
-        // Tentativo 1: GeoJSON standard
         try {
             val root = JSONObject(jsonString)
             if (root.optString("type") == "FeatureCollection") {
@@ -383,7 +409,6 @@ private fun loadSafetyDevices(context: Context): List<SafetyDevice> {
             }
         } catch (_: Exception) {}
 
-        // Tentativo 2: Formato "Schema 1" (Oggetto complesso con array "devices")
         try {
             val root = JSONObject(jsonString)
             if (root.has("devices")) {
@@ -393,15 +418,12 @@ private fun loadSafetyDevices(context: Context): List<SafetyDevice> {
                     val lat = obj.optDouble("lat", Double.NaN)
                     val lon = obj.optDouble("lon", Double.NaN)
                     val type = obj.optString("type", obj.optString("id", "Segnalazione"))
-                    if (!lat.isNaN() && !lon.isNaN()) {
-                        list.add(SafetyDevice(lat, lon, type))
-                    }
+                    if (!lat.isNaN() && !lon.isNaN()) list.add(SafetyDevice(lat, lon, type))
                 }
                 return list
             }
         } catch (_: Exception) {}
 
-        // Tentativo 3: Formato Array JSON semplice (Vecchio formato)
         val array = JSONArray(jsonString)
         for (i in 0 until array.length()) {
             val obj = array.getJSONObject(i)
@@ -414,14 +436,14 @@ private fun loadSafetyDevices(context: Context): List<SafetyDevice> {
     } catch (e: Exception) { emptyList() }
 }
 
-// --- COMPONENTI UI MODULARI ---
+// --- COMPONENTI UI ---
 
 @Composable
 private fun TopStatusBar(gps: Location?, navigating: Boolean, muted: Boolean, onMuteToggle: () -> Unit) {
     Surface(color = CardSurface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(8.dp, RectangleShape)) {
         Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column {
-                Text("STRADASAFE 0.92", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text("STRADASAFE 0.95 RC", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Text(
                     if (gps != null) "GPS Attivo (${gps.accuracy.roundToInt()}m)" else "Ricerca segnale GPS...",
                     color = if (gps != null) WazeGreen else AlertAmber,
@@ -503,17 +525,14 @@ private fun ManeuverCard(step: Step?, distanceToStep: Double) {
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
                 Text(if (distanceToStep.isNaN()) "..." else "${distanceToStep.roundToInt()} m", color = TextWhite, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
-                Text(step?.text ?: "Prosegui dritto", color = WazeCyan, fontSize = 16.sp, maxLines = 2, fontWeight = FontWeight.Medium)
+                Text(step?.text ?: "Prosegui", color = WazeCyan, fontSize = 16.sp, maxLines = 2, fontWeight = FontWeight.Medium)
             }
         }
     }
 }
 
 @Composable
-private fun EtaCard(
-    speed: Int, speedLimit: Int?, inTutorZone: Boolean, avgTutorSpeed: Int, 
-    remainingDistance: Double, remainingDuration: Double, onStop: () -> Unit
-) {
+private fun EtaCard(speed: Int, speedLimit: Int?, inTutorZone: Boolean, avgTutorSpeed: Int, remainingDistance: Double, remainingDuration: Double, onStop: () -> Unit) {
     val etaMillis = System.currentTimeMillis() + (remainingDuration * 1000).toLong()
     val etaFormat = java.text.SimpleDateFormat("HH:mm", Locale.getDefault())
     val etaString = if (remainingDuration > 0) etaFormat.format(java.util.Date(etaMillis)) else "--:--"
@@ -527,19 +546,15 @@ private fun EtaCard(
                 
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     MetricDashboard("$speed", "KM/H", speedColor)
-                    
                     if (speedLimit != null) {
                         Surface(shape = RectangleShape, color = TextWhite, border = BorderStroke(3.dp, AlertRed), modifier = Modifier.size(36.dp)) {
                             Box(contentAlignment = Alignment.Center) { Text("$speedLimit", color = DarkBackground, fontWeight = FontWeight.Bold, fontSize = 14.sp) }
                         }
                     }
-
                     if (inTutorZone) {
                         val isAvgSpeeding = speedLimit != null && avgTutorSpeed > speedLimit
                         val avgColor = if (isAvgSpeeding) AlertRed else AlertAmber
-                        Surface(shape = RectangleShape, color = Color(0x33FF9F0A), modifier = Modifier.padding(start = 8.dp)) {
-                            MetricDashboard("$avgTutorSpeed", "MEDIA", avgColor, modifier = Modifier.padding(horizontal = 8.dp))
-                        }
+                        Surface(shape = RectangleShape, color = Color(0x33FF9F0A), modifier = Modifier.padding(start = 8.dp)) { MetricDashboard("$avgTutorSpeed", "MEDIA", avgColor, modifier = Modifier.padding(horizontal = 8.dp)) }
                     }
                 }
                 
@@ -565,8 +580,9 @@ private fun getManifoldSymbol(maneuver: String?): String = when (maneuver) {
     else -> "↑"
 }
 
+// MapView aggiornata alla V0.95: Smooth Camera & Auto-Zoom
 @Composable
-private fun NavMap(location: Location?, place: Place?, route: RouteData?, follow: Boolean) {
+private fun NavMap(location: Location?, place: Place?, route: RouteData?, navigating: Boolean, followUser: Boolean, speed: Int) {
     val context = LocalContext.current
     val mapView = remember { MapView(context) }
     var ready by remember { mutableStateOf(false) }
@@ -603,7 +619,7 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, follow
                 
                 route?.let { r ->
                     m.style?.getSourceAs<GeoJsonSource>("route")?.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(r.points)))
-                    if (!follow && !fitted) {
+                    if (!navigating && !fitted) {
                         val b = LatLngBounds.Builder()
                         r.points.forEach { b.include(LatLng(it.latitude(), it.longitude())) }
                         m.animateCamera(CameraUpdateFactory.newLatLngBounds(b.build(), 150), 800)
@@ -614,13 +630,24 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, follow
                 val safetyPoints = AppState.safetyDevices.value.map { Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) }
                 if (safetyPoints.isNotEmpty()) m.style?.getSourceAs<GeoJsonSource>("safety")?.setGeoJson(FeatureCollection.fromFeatures(safetyPoints))
 
-                if (follow && location != null) {
-                    m.cameraPosition = CameraPosition.Builder()
+                // V0.95 - Telecamera Adattiva Smooth: Zoom e Tilt dipendono dalla velocità
+                if (navigating && followUser && location != null) {
+                    val targetZoom = when {
+                        speed > 90 -> 15.0  // Zoom out autostrada
+                        speed > 50 -> 16.5  // Media velocità
+                        else -> 17.5        // Zoom in urbano o prossimità di svolta
+                    }
+                    val targetTilt = if (speed > 80) 60.0 else 45.0 // Inclina la visuale per vedere più in là in autostrada
+
+                    val pos = CameraPosition.Builder()
                         .target(LatLng(location.latitude, location.longitude))
-                        .zoom(17.5)
+                        .zoom(targetZoom)
                         .bearing(if (location.hasBearing()) location.bearing.toDouble() else 0.0)
-                        .tilt(55.0)
+                        .tilt(targetTilt)
                         .build()
+                        
+                    // Animazione fluida di 1 secondo invece del teletrasporto brutale
+                    m.animateCamera(CameraUpdateFactory.newCameraPosition(pos), 1000)
                 }
             }
         },
@@ -696,7 +723,7 @@ private fun instruction(type: String, mod: String, name: String): String {
 private fun get(address: String): String {
     val c = (URL(address).openConnection() as HttpURLConnection).apply {
         connectTimeout = 15000; readTimeout = 20000; requestMethod = "GET"
-        setRequestProperty("User-Agent", "StradaSafeLiguria/0.92 private prototype")
+        setRequestProperty("User-Agent", "StradaSafeLiguria/0.95 RC")
         setRequestProperty("Accept-Language", "it")
     }
     try {
