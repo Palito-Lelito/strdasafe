@@ -18,6 +18,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -81,6 +83,7 @@ private const val ROUTE_BASE = "https://router.project-osrm.org"
 object AppState {
     val query = mutableStateOf("")
     val searchResults = mutableStateOf<List<Place>>(emptyList())
+    val searchHistory = mutableStateOf<List<Place>>(emptyList())
     val place = mutableStateOf<Place?>(null)
     val route = mutableStateOf<RouteData?>(null)
     val navigating = mutableStateOf(false)
@@ -166,11 +169,15 @@ private fun App(client: FusedLocationProviderClient) {
     val (tts, ttsReady) = rememberSpeaker()
 
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) { AppState.safetyDevices.value = loadSafetyDevices(context) }
+        withContext(Dispatchers.IO) {
+            AppState.safetyDevices.value = loadSafetyDevices(context)
+            AppState.searchHistory.value = loadHistory(context)
+        }
     }
 
     var query by AppState.query
     var searchResults by AppState.searchResults
+    var searchHistory by AppState.searchHistory
     var place by AppState.place
     var route by AppState.route
     var navigating by AppState.navigating
@@ -193,7 +200,6 @@ private fun App(client: FusedLocationProviderClient) {
     var lastReroute by remember { mutableLongStateOf(0L) }
     var avgTutorSpeed by remember { mutableIntStateOf(0) }
     
-    // Stato per gestire l'auto-hide del tasto "Termina Viaggio"
     var showStopButton by remember { mutableStateOf(true) }
 
     val currentStep = route?.steps?.getOrNull(stepIndex)
@@ -203,7 +209,6 @@ private fun App(client: FusedLocationProviderClient) {
     val remainingDistance = route?.steps?.drop(stepIndex)?.sumOf { it.distance } ?: 0.0
     val remainingDuration = route?.steps?.drop(stepIndex)?.sumOf { it.duration } ?: 0.0
 
-    // Timer Auto-Hide per il bottone di fine viaggio
     LaunchedEffect(showStopButton, navigating) {
         if (navigating && showStopButton) {
             delay(10000)
@@ -296,64 +301,116 @@ private fun App(client: FusedLocationProviderClient) {
                 NavMap(gps, place, route, navigating, followUser, speed)
             }
 
-            // Layout Unificato per Orizzontale e Verticale (Floating Style)
             Box(Modifier.fillMaxSize().systemBarsPadding().padding(16.dp)) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .then(if (isLandscape) Modifier.widthIn(max = 380.dp) else Modifier.fillMaxWidth()),
-                    verticalArrangement = Arrangement.SpaceBetween
-                ) {
-                    
-                    // PARTE SUPERIORE (Stato o Manovra)
-                    Column {
-                        if (!navigating) {
-                            TopStatusBar(gps)
-                            Spacer(Modifier.height(10.dp))
-                        }
-                        
-                        if (navigating && route != null) {
-                            ManeuverCard(currentStep, distanceToStep, muted, onMuteToggle = { muted = !muted })
-                        }
-                    }
-                    
-                    // PARTE INFERIORE (Cruscotto, Ricerca, Overview)
-                    Column(horizontalAlignment = Alignment.End) {
-                        
-                        if (navigating && !followUser) {
-                            Button(onClick = { followUser = true }, shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue, contentColor = TextWhite), modifier = Modifier.padding(bottom = 16.dp).shadow(8.dp)) {
-                                Text("📍 RICENTRA", fontWeight = FontWeight.Bold)
+                if (isLandscape) {
+                    Column(
+                        modifier = Modifier.fillMaxHeight().widthIn(max = 380.dp),
+                        verticalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            if (!navigating) {
+                                TopStatusBar(gps)
+                                Spacer(Modifier.height(10.dp))
+                            }
+                            
+                            if (navigating && route != null) {
+                                ManeuverCard(currentStep, distanceToStep, muted, onMuteToggle = { muted = !muted })
                             }
                         }
-
-                        if (navigating && route != null) {
-                            EtaCard(
-                                speed = speed,
-                                speedLimit = speedLimit,
-                                inTutorZone = AppState.inTutorZone.value,
-                                avgTutorSpeed = avgTutorSpeed,
-                                remainingDistance = remainingDistance,
-                                remainingDuration = remainingDuration,
-                                showStopButton = showStopButton,
-                                onCardClick = { showStopButton = true },
-                                onStop = {
-                                    resetNavigation()
-                                    showStopButton = true // Resetta per il prossimo viaggio
+                        
+                        Column(horizontalAlignment = Alignment.End) {
+                            if (navigating && !followUser) {
+                                Button(onClick = { followUser = true }, shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue, contentColor = TextWhite), modifier = Modifier.padding(bottom = 16.dp).shadow(8.dp)) {
+                                    Text("📍 RICENTRA", fontWeight = FontWeight.Bold)
                                 }
-                            )
-                        } else if (route != null) {
-                            OverviewCard(route!!, place, onStart = {
-                                navigating = true; isSearchExpanded = false; followUser = true; showStopButton = true
-                                AppState.activeSafetyDevices.value = AppState.safetyDevices.value.filter { distanceToPolyline(it.lat, it.lon, route!!.points) < 100.0 }
-                            }, onReset = { route = null; place = null })
-                        } else if (isSearchExpanded) {
-                            SearchExpandedCard(query, { query = it }, granted, { ask.launch(Manifest.permission.ACCESS_FINE_LOCATION) }, busy, error, searchResults,
-                                onSearch = { scope.launch { busy = true; error = null; try { searchResults = searchPlaces(query) } catch (e: Exception) { error = e.message } finally { busy = false } } },
-                                onPlaceSelected = { p -> scope.launch { busy = true; error = null; searchResults = emptyList(); place = p; try { route = fetchRoute(gps ?: error("Attendi GPS"), p) } catch (e: Exception) { error = e.message } finally { busy = false; isSearchExpanded = false } } },
-                                onClose = { isSearchExpanded = false }
-                            )
-                        } else {
-                            HomeBottomBar(onClick = { isSearchExpanded = true })
+                            }
+
+                            if (navigating && route != null) {
+                                EtaCard(
+                                    speed = speed,
+                                    speedLimit = speedLimit,
+                                    inTutorZone = AppState.inTutorZone.value,
+                                    avgTutorSpeed = avgTutorSpeed,
+                                    remainingDistance = remainingDistance,
+                                    remainingDuration = remainingDuration,
+                                    showStopButton = showStopButton,
+                                    onCardClick = { showStopButton = true },
+                                    onStop = { resetNavigation(); showStopButton = true }
+                                )
+                            } else if (route != null) {
+                                OverviewCard(route!!, place, onStart = {
+                                    navigating = true; isSearchExpanded = false; followUser = true; showStopButton = true
+                                    AppState.activeSafetyDevices.value = AppState.safetyDevices.value.filter { distanceToPolyline(it.lat, it.lon, route!!.points) < 100.0 }
+                                }, onReset = { resetNavigation() })
+                            } else if (isSearchExpanded) {
+                                SearchExpandedCard(query, { query = it }, granted, { ask.launch(Manifest.permission.ACCESS_FINE_LOCATION) }, busy, error, searchResults, searchHistory,
+                                    onSearch = { scope.launch { busy = true; error = null; try { searchResults = searchPlaces(query) } catch (e: Exception) { error = e.message } finally { busy = false } } },
+                                    onPlaceSelected = { p -> scope.launch { 
+                                        busy = true; error = null; searchResults = emptyList(); place = p
+                                        val newHistory = (listOf(p) + searchHistory).distinctBy { it.name }.take(5)
+                                        searchHistory = newHistory
+                                        saveHistory(context, newHistory)
+                                        try { route = fetchRoute(gps ?: error("Attendi GPS"), p) } catch (e: Exception) { error = e.message } finally { busy = false; isSearchExpanded = false } 
+                                    } },
+                                    onClose = { isSearchExpanded = false }
+                                )
+                            } else {
+                                HomeBottomBar(onClick = { isSearchExpanded = true })
+                            }
+                        }
+                    }
+                } else {
+                    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
+                        Column {
+                            if (!navigating) {
+                                TopStatusBar(gps)
+                                Spacer(Modifier.height(10.dp))
+                            }
+                            
+                            if (navigating && route != null) {
+                                ManeuverCard(currentStep, distanceToStep, muted, onMuteToggle = { muted = !muted })
+                            }
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            
+                            if (navigating && !followUser) {
+                                Button(onClick = { followUser = true }, shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue, contentColor = TextWhite), modifier = Modifier.padding(bottom = 16.dp).shadow(8.dp)) {
+                                    Text("📍 RICENTRA", fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            if (navigating && route != null) {
+                                EtaCard(
+                                    speed = speed,
+                                    speedLimit = speedLimit,
+                                    inTutorZone = AppState.inTutorZone.value,
+                                    avgTutorSpeed = avgTutorSpeed,
+                                    remainingDistance = remainingDistance,
+                                    remainingDuration = remainingDuration,
+                                    showStopButton = showStopButton,
+                                    onCardClick = { showStopButton = true },
+                                    onStop = { resetNavigation(); showStopButton = true }
+                                )
+                            } else if (route != null) {
+                                OverviewCard(route!!, place, onStart = {
+                                    navigating = true; isSearchExpanded = false; followUser = true; showStopButton = true
+                                    AppState.activeSafetyDevices.value = AppState.safetyDevices.value.filter { distanceToPolyline(it.lat, it.lon, route!!.points) < 100.0 }
+                                }, onReset = { resetNavigation() })
+                            } else if (isSearchExpanded) {
+                                SearchExpandedCard(query, { query = it }, granted, { ask.launch(Manifest.permission.ACCESS_FINE_LOCATION) }, busy, error, searchResults, searchHistory,
+                                    onSearch = { scope.launch { busy = true; error = null; try { searchResults = searchPlaces(query) } catch (e: Exception) { error = e.message } finally { busy = false } } },
+                                    onPlaceSelected = { p -> scope.launch { 
+                                        busy = true; error = null; searchResults = emptyList(); place = p
+                                        val newHistory = (listOf(p) + searchHistory).distinctBy { it.name }.take(5)
+                                        searchHistory = newHistory
+                                        saveHistory(context, newHistory)
+                                        try { route = fetchRoute(gps ?: error("Attendi GPS"), p) } catch (e: Exception) { error = e.message } finally { busy = false; isSearchExpanded = false } 
+                                    } },
+                                    onClose = { isSearchExpanded = false }
+                                )
+                            } else {
+                                HomeBottomBar(onClick = { isSearchExpanded = true })
+                            }
                         }
                     }
                 }
@@ -370,6 +427,37 @@ private fun resetNavigation() {
     AppState.speedLimit.value = null
     AppState.inTutorZone.value = false
     AppState.followUser.value = true
+    AppState.route.value = null  // Svuota il tracciato grafico
+    AppState.place.value = null  // Svuota il pin destinazione
+}
+
+// --- LOGICA PERSISTENZA CRONOLOGIA (SharedPreferences) ---
+private fun saveHistory(context: Context, history: List<Place>) {
+    val prefs = context.getSharedPreferences("StradaSafePrefs", Context.MODE_PRIVATE)
+    val jsonArray = JSONArray()
+    history.forEach { 
+        val obj = JSONObject().apply {
+            put("name", it.name)
+            put("lat", it.lat)
+            put("lon", it.lon)
+        }
+        jsonArray.put(obj)
+    }
+    prefs.edit().putString("search_history", jsonArray.toString()).apply()
+}
+
+private fun loadHistory(context: Context): List<Place> {
+    val prefs = context.getSharedPreferences("StradaSafePrefs", Context.MODE_PRIVATE)
+    val historyStr = prefs.getString("search_history", "[]") ?: "[]"
+    val list = mutableListOf<Place>()
+    try {
+        val arr = JSONArray(historyStr)
+        for (i in 0 until arr.length()) {
+            val obj = arr.getJSONObject(i)
+            list.add(Place(obj.getString("name"), obj.getDouble("lat"), obj.getDouble("lon")))
+        }
+    } catch(e: Exception){}
+    return list
 }
 
 private suspend fun fetchSpeedLimit(lat: Double, lon: Double): Int? = withContext(Dispatchers.IO) {
@@ -378,7 +466,7 @@ private suspend fun fetchSpeedLimit(lat: Double, lon: Double): Int? = withContex
         val e = URLEncoder.encode(query, "UTF-8")
         val c = (URL("https://overpass-api.de/api/interpreter?data=$e").openConnection() as HttpURLConnection).apply {
             connectTimeout = 3000; readTimeout = 3000; requestMethod = "GET"
-            setRequestProperty("User-Agent", "StradaSafeLiguria/0.97")
+            setRequestProperty("User-Agent", "StradaSafeLiguria/0.98")
         }
         val res = c.inputStream.bufferedReader().use { it.readText() }
         val els = JSONObject(res).optJSONArray("elements") ?: return@withContext null
@@ -456,7 +544,7 @@ private fun TopStatusBar(gps: Location?) {
     Surface(color = CardSurface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(8.dp, RectangleShape)) {
         Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column {
-                Text("STRADASAFE 0.97", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text("STRADASAFE 0.98", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Text(
                     if (gps != null) "GPS Attivo (${gps.accuracy.roundToInt()}m)" else "Ricerca segnale GPS...",
                     color = if (gps != null) WazeGreen else AlertAmber,
@@ -481,7 +569,7 @@ private fun HomeBottomBar(onClick: () -> Unit) {
 @Composable
 private fun SearchExpandedCard(
     query: String, onQuery: (String) -> Unit, granted: Boolean, onGps: () -> Unit,
-    busy: Boolean, error: String?, results: List<Place>,
+    busy: Boolean, error: String?, results: List<Place>, history: List<Place>,
     onSearch: () -> Unit, onPlaceSelected: (Place) -> Unit, onClose: () -> Unit
 ) {
     Surface(color = CardSurface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(16.dp, RectangleShape)) {
@@ -498,11 +586,25 @@ private fun SearchExpandedCard(
             if (!granted) Button(onClick = onGps, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue)) { Text("ATTIVA PERMESSO GPS", color = TextWhite, fontWeight = FontWeight.Bold) }
             Button(onClick = onSearch, enabled = query.length > 2 && granted && !busy, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue)) { Text(if (busy) "CERCANDO..." else "CERCA", color = TextWhite, fontWeight = FontWeight.Bold) }
             error?.let { Text(it, color = AlertRed, fontSize = 13.sp) }
+            
             if (results.isNotEmpty()) {
                 LazyColumn(Modifier.fillMaxWidth().heightIn(max = 220.dp)) {
                     items(results) { res ->
                         TextButton(onClick = { onPlaceSelected(res) }, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, contentPadding = PaddingValues(12.dp)) {
                             Text(res.name, color = TextWhite, maxLines = 2, fontSize = 14.sp, textAlign = TextAlign.Start, modifier = Modifier.fillMaxWidth())
+                        }
+                        HorizontalDivider(color = Color(0x33FFFFFF))
+                    }
+                }
+            } else if (query.isEmpty() && history.isNotEmpty()) {
+                Text("CRONOLOGIA RECENTE", color = TextGray, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 220.dp)) {
+                    items(history) { res ->
+                        TextButton(onClick = { onPlaceSelected(res) }, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, contentPadding = PaddingValues(12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                Text("🕒", fontSize = 16.sp, modifier = Modifier.padding(end = 12.dp))
+                                Text(res.name, color = TextWhite, maxLines = 2, fontSize = 14.sp, textAlign = TextAlign.Start, modifier = Modifier.fillMaxWidth())
+                            }
                         }
                         HorizontalDivider(color = Color(0x33FFFFFF))
                     }
@@ -586,12 +688,7 @@ private fun EtaCard(
             }
             
             if (showStopButton) {
-                Button(
-                    onClick = onStop, 
-                    modifier = Modifier.fillMaxWidth(), 
-                    shape = RectangleShape, 
-                    colors = ButtonDefaults.buttonColors(containerColor = AlertRed)
-                ) { 
+                Button(onClick = onStop, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AlertRed)) { 
                     Text("TERMINA VIAGGIO", color = TextWhite, fontWeight = FontWeight.Bold) 
                 }
             }
@@ -647,18 +744,29 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
         update = { v ->
             if (ready) v.getMapAsync { m ->
                 location?.let { m.style?.getSourceAs<GeoJsonSource>("gps")?.setGeoJson(Feature.fromGeometry(Point.fromLngLat(it.longitude, it.latitude))) }
-                place?.let { m.style?.getSourceAs<GeoJsonSource>("dest")?.setGeoJson(Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat))) }
                 
-                route?.let { r ->
-                    m.style?.getSourceAs<GeoJsonSource>("route")?.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(r.points)))
+                // Pulizia o Disegno Destinazione
+                if (place != null) {
+                    m.style?.getSourceAs<GeoJsonSource>("dest")?.setGeoJson(Feature.fromGeometry(Point.fromLngLat(place.lon, place.lat)))
+                } else {
+                    m.style?.getSourceAs<GeoJsonSource>("dest")?.setGeoJson(FeatureCollection.fromFeatures(emptyArray<Feature>()))
+                }
+                
+                // Pulizia o Disegno Linea Percorso
+                if (route != null) {
+                    m.style?.getSourceAs<GeoJsonSource>("route")?.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(route.points)))
                     if (!navigating && !fitted) {
                         val b = LatLngBounds.Builder()
-                        r.points.forEach { b.include(LatLng(it.latitude(), it.longitude())) }
+                        route.points.forEach { b.include(LatLng(it.latitude(), it.longitude())) }
                         m.animateCamera(CameraUpdateFactory.newLatLngBounds(b.build(), 150), 800)
                         fitted = true
                     }
+                } else {
+                    m.style?.getSourceAs<GeoJsonSource>("route")?.setGeoJson(FeatureCollection.fromFeatures(emptyArray<Feature>()))
+                    fitted = false
                 }
 
+                // Disegno Velox sul percorso
                 val safetyPoints = if (navigating) {
                     AppState.activeSafetyDevices.value.map { Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) }
                 } else {
@@ -666,6 +774,7 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                 }
                 m.style?.getSourceAs<GeoJsonSource>("safety")?.setGeoJson(FeatureCollection.fromFeatures(safetyPoints))
 
+                // Telecamera Adattiva
                 if (navigating && followUser && location != null) {
                     val targetZoom = when {
                         speed > 90 -> 15.0
@@ -757,7 +866,7 @@ private fun instruction(type: String, mod: String, name: String): String {
 private fun get(address: String): String {
     val c = (URL(address).openConnection() as HttpURLConnection).apply {
         connectTimeout = 15000; readTimeout = 20000; requestMethod = "GET"
-        setRequestProperty("User-Agent", "StradaSafeLiguria/0.97")
+        setRequestProperty("User-Agent", "StradaSafeLiguria/0.98")
         setRequestProperty("Accept-Language", "it")
     }
     try {
