@@ -71,7 +71,7 @@ import java.net.URLEncoder
 import java.util.Locale
 import kotlin.math.*
 
-// INSERISCI QUI LA TUA CHIAVE OPENROUTESERVICE
+// CHIAVE OPENROUTESERVICE DELL'UTENTE
 private const val ORS_API_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImZjZDcxY2MyNmJiNjQwYzU4OTIzZDY0ZGE2MDEyMWJiIiwiaCI6Im11cm11cjY0In0="
 
 // --- SERVIZIO IN BACKGROUND PER GPS A SCHERMO SPENTO ---
@@ -91,7 +91,7 @@ class NavigationService : Service() {
         val notification = NotificationCompat.Builder(this, channelId)
             .setContentTitle("StradaSafe 1.1")
             .setContentText("Navigazione in background attiva")
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setSmallIcon(android.R.drawable.ic_menu_mylocation) // Usa icona base se mancano mipmap
             .setOngoing(true)
             .build()
         startForeground(1, notification)
@@ -99,7 +99,7 @@ class NavigationService : Service() {
     }
 }
 
-// Palette Squadrata e Solida
+// Palette Grafica (Brutalista e compatta, niente trasparenze extra)
 private val DarkBackground = Color(0xFF000000)
 private val CardSurface = Color(0xE61C1C1E)
 private val AppleBlue = Color(0xFF0A84FF)
@@ -124,7 +124,7 @@ object AppState {
     val isSearchExpanded = mutableStateOf(false)
     val stepIndex = mutableIntStateOf(0)
     
-    // Filtri percorso
+    // Filtri Routing
     val avoidTolls = mutableStateOf(false)
     val avoidHighways = mutableStateOf(false)
     
@@ -197,6 +197,7 @@ private fun rememberSpeaker(): Pair<TextToSpeech?, Boolean> {
     return tts to ready
 }
 
+// Simulatore di movimento in galleria (Dead Reckoning)
 private fun simulateMovement(lastLoc: Location, timeDeltaMs: Long): Location {
     val distanceMeters = (lastLoc.speed) * (timeDeltaMs / 1000f)
     val r = 6371000.0
@@ -250,6 +251,7 @@ private fun App(client: FusedLocationProviderClient) {
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
     val rawGps = rememberGps(client, granted)
     
+    // Gestione Galleria
     var effectiveGps by remember { mutableStateOf<Location?>(null) }
     var isSimulating by remember { mutableStateOf(false) }
     
@@ -290,10 +292,12 @@ private fun App(client: FusedLocationProviderClient) {
     val remainingDistance = route?.steps?.drop(stepIndex)?.sumOf { it.distance } ?: 0.0
     val remainingDuration = route?.steps?.drop(stepIndex)?.sumOf { it.duration } ?: 0.0
 
+    // Auto-hide Tasto "Termina"
     LaunchedEffect(showStopButton, navigating) {
         if (navigating && showStopButton) { delay(10000); showStopButton = false }
     }
 
+    // Foreground Service Gestione
     LaunchedEffect(navigating) {
         val serviceIntent = Intent(context, NavigationService::class.java)
         if (navigating) {
@@ -388,12 +392,14 @@ private fun App(client: FusedLocationProviderClient) {
                 NavMap(effectiveGps, place, route, navigating, followUser, speed, isSimulating)
             }
             
+            // Banner Simulazione GPS (Galleria)
             if (navigating && isSimulating) {
                 Surface(color = AlertAmber, shape = RectangleShape, modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter).padding(top = 24.dp)) {
                     Text("SEGNALE GPS PERSO - SIMULAZIONE IN CORSO", color = DarkBackground, fontWeight = FontWeight.Bold, fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(8.dp))
                 }
             }
 
+            // --- UI PRINCIPALE (LAYOUT SQUADRATO E COMPATTO) ---
             Box(Modifier.fillMaxSize().systemBarsPadding().padding(16.dp)) {
                 if (isLandscape) {
                     Column(modifier = Modifier.fillMaxHeight().widthIn(max = 340.dp), verticalArrangement = Arrangement.SpaceBetween) {
@@ -600,6 +606,7 @@ private fun SearchExpandedCard(
                 TextButton(onClick = onClose) { Text("CHIUDI", color = AppleBlue, fontSize = 13.sp) }
             }
             
+            // Checkbox di instradamento
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { onTollsChange(!avoidTolls) }) {
                     Checkbox(checked = avoidTolls, onCheckedChange = onTollsChange, colors = CheckboxDefaults.colors(checkedColor = AppleBlue, uncheckedColor = TextGray))
@@ -735,7 +742,7 @@ private fun MetricDashboard(value: String, unit: String, color: Color, modifier:
     Text(unit, color = TextGray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
 }
 
-// LOGICA OPENROUTESERVICE PER LE ICONE DI SVOLTA
+// Logica per le icone di svolta di OpenRouteService
 private fun getOrsManeuverSymbol(type: Int?): String = when (type) {
     0, 2, 4, 12 -> "↰"
     1, 3, 5, 13 -> "↱"
@@ -847,7 +854,18 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
 
 private suspend fun searchPlaces(q: String): List<Place> = withContext(Dispatchers.IO) {
     val e = URLEncoder.encode(q, "UTF-8")
-    val res = get("$SEARCH_BASE/search?q=$e&format=jsonv2&limit=5&countrycodes=it&viewbox=7.45,44.75,10.10,43.70&bounded=1")
+    // Usiamo il classico motore GET di Nominatim per la ricerca dell'indirizzo
+    val c = (URL("$SEARCH_BASE/search?q=$e&format=jsonv2&limit=5&countrycodes=it&viewbox=7.45,44.75,10.10,43.70&bounded=1").openConnection() as HttpURLConnection).apply {
+        connectTimeout = 15000; readTimeout = 20000; requestMethod = "GET"
+        setRequestProperty("User-Agent", "StradaSafeLiguria/1.1")
+        setRequestProperty("Accept-Language", "it")
+    }
+    
+    val res = try {
+        if (c.responseCode !in 200..299) error("Servizio ricerca non disponibile")
+        c.inputStream.bufferedReader().use { it.readText() }
+    } finally { c.disconnect() }
+    
     val a = JSONArray(res)
     if (a.length() == 0) error("Nessun risultato trovato in Liguria.")
 
@@ -859,71 +877,91 @@ private suspend fun searchPlaces(q: String): List<Place> = withContext(Dispatche
     list
 }
 
-// --- NUOVO MOTORE DI ROUTING (OPENROUTESERVICE) ---
+// --- NUOVO MOTORE DI ROUTING (OPENROUTESERVICE in modalità POST) ---
 private suspend fun fetchRoute(l: Location, p: Place, avoidTolls: Boolean, avoidHighways: Boolean): RouteData = withContext(Dispatchers.IO) {
-    if (ORS_API_KEY == "INSERISCI_QUI_LA_TUA_CHIAVE") error("API Key ORS mancante. Modifica il file sorgente.")
     
-    val avoids = mutableListOf<String>()
-    if (avoidTolls) avoids.add("\"tollways\"")
-    if (avoidHighways) avoids.add("\"highways\"")
-
-    var urlStr = "https://api.openrouteservice.org/v2/directions/driving-car?api_key=$ORS_API_KEY&start=${l.longitude},${l.latitude}&end=${p.lon},${p.lat}&language=it"
+    val urlStr = "https://api.openrouteservice.org/v2/directions/driving-car/geojson"
     
-    if (avoids.isNotEmpty()) {
-        val options = "{\"avoid_features\":[${avoids.joinToString(",")}]}"
-        urlStr += "&options=${URLEncoder.encode(options, "UTF-8")}"
-    }
-
-    val res = get(urlStr)
-    val root = JSONObject(res)
-    if (root.has("error")) error("Errore nel calcolo del percorso (ORS)")
-
-    val feature = root.getJSONArray("features").getJSONObject(0)
-    
-    // Parsificazione Geometria (Coordinate)
-    val coords = feature.getJSONObject("geometry").getJSONArray("coordinates")
-    val pts = (0 until coords.length()).map { 
-        val a = coords.getJSONArray(it)
-        Point.fromLngLat(a.getDouble(0), a.getDouble(1)) 
-    }
-    
-    val steps = mutableListOf<Step>()
-    val props = feature.getJSONObject("properties")
-    val summary = props.getJSONObject("summary")
-    
-    // Parsificazione Istruzioni
-    val segments = props.getJSONArray("segments")
-    for (i in 0 until segments.length()) {
-        val segSteps = segments.getJSONObject(i).getJSONArray("steps")
-        for (j in 0 until segSteps.length()) {
-            val s = segSteps.getJSONObject(j)
-            val wpIndex = s.getJSONArray("way_points").getInt(0)
-            val pt = pts[wpIndex]
-            
-            steps += Step(
-                text = s.getString("instruction"), // Il testo ora arriva nativamente in Italiano da ORS
-                lat = pt.latitude(), lon = pt.longitude(),
-                distance = s.getDouble("distance"), duration = s.getDouble("duration"),
-                maneuver = s.getInt("type").toString() // Salviamo l'ID tipo numerico per getOrsManeuverSymbol()
-            )
+    // Costruzione del JSON Payload per forzare le esclusioni
+    val jsonBody = JSONObject().apply {
+        put("coordinates", JSONArray().apply {
+            put(JSONArray().apply { put(l.longitude); put(l.latitude) })
+            put(JSONArray().apply { put(p.lon); put(p.lat) })
+        })
+        put("language", "it") // La sintesi vocale sarà in italiano nativo
+        put("instructions", true)
+        
+        val avoids = JSONArray()
+        if (avoidTolls) avoids.put("tollways")
+        if (avoidHighways) avoids.put("highways")
+        
+        if (avoids.length() > 0) {
+            put("options", JSONObject().apply {
+                put("avoid_features", avoids)
+            })
         }
     }
-    RouteData(pts, summary.getDouble("distance"), summary.getDouble("duration"), steps)
-}
 
-private fun get(address: String): String {
-    val c = (URL(address).openConnection() as HttpURLConnection).apply {
-        connectTimeout = 15000; readTimeout = 20000; requestMethod = "GET"
-        setRequestProperty("User-Agent", "StradaSafeLiguria/1.1")
-        setRequestProperty("Accept-Language", "it")
+    val c = (URL(urlStr).openConnection() as HttpURLConnection).apply {
+        connectTimeout = 15000
+        readTimeout = 20000
+        requestMethod = "POST"
+        setRequestProperty("Authorization", ORS_API_KEY)
+        setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        setRequestProperty("Accept", "application/json, application/geo+json; charset=utf-8")
+        doOutput = true
     }
+    
     try {
+        // Invio dei dati
+        c.outputStream.use { os ->
+            val input = jsonBody.toString().toByteArray(Charsets.UTF_8)
+            os.write(input, 0, input.size)
+        }
+
         if (c.responseCode !in 200..299) {
             if (c.responseCode == 401 || c.responseCode == 403) error("API Key ORS non valida")
-            error("Servizio non disponibile (${c.responseCode})")
+            error("Nessun percorso alternativo trovato (${c.responseCode})")
         }
-        return c.inputStream.bufferedReader().use { it.readText() }
-    } finally { c.disconnect() }
+        
+        val res = c.inputStream.bufferedReader().use { it.readText() }
+        val root = JSONObject(res)
+        if (root.has("error")) error("Errore nel calcolo del percorso")
+
+        val feature = root.getJSONArray("features").getJSONObject(0)
+        
+        // Estraggo i punti della polyline blu
+        val coords = feature.getJSONObject("geometry").getJSONArray("coordinates")
+        val pts = (0 until coords.length()).map { 
+            val a = coords.getJSONArray(it)
+            Point.fromLngLat(a.getDouble(0), a.getDouble(1)) 
+        }
+        
+        val steps = mutableListOf<Step>()
+        val props = feature.getJSONObject("properties")
+        val summary = props.getJSONObject("summary")
+        
+        // Estraggo le istruzioni turn-by-turn
+        val segments = props.getJSONArray("segments")
+        for (i in 0 until segments.length()) {
+            val segSteps = segments.getJSONObject(i).getJSONArray("steps")
+            for (j in 0 until segSteps.length()) {
+                val s = segSteps.getJSONObject(j)
+                val wpIndex = s.getJSONArray("way_points").getInt(0)
+                val pt = pts[wpIndex]
+                
+                steps += Step(
+                    text = s.getString("instruction"),
+                    lat = pt.latitude(), lon = pt.longitude(),
+                    distance = s.getDouble("distance"), duration = s.getDouble("duration"),
+                    maneuver = s.getInt("type").toString()
+                )
+            }
+        }
+        RouteData(pts, summary.getDouble("distance"), summary.getDouble("duration"), steps)
+    } finally {
+        c.disconnect()
+    }
 }
 
 private fun distanceMeters(a: Double, b: Double, c: Double, d: Double): Double {
