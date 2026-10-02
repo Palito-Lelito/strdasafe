@@ -91,7 +91,7 @@ class NavigationService : Service() {
         val notification = NotificationCompat.Builder(this, channelId)
             .setContentTitle("StradaSafe 1.1")
             .setContentText("Navigazione in background attiva")
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation) // Usa icona base se mancano mipmap
+            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)
             .build()
         startForeground(1, notification)
@@ -99,7 +99,7 @@ class NavigationService : Service() {
     }
 }
 
-// Palette Grafica (Brutalista e compatta, niente trasparenze extra)
+// Palette Grafica Squadrata e Compatta
 private val DarkBackground = Color(0xFF000000)
 private val CardSurface = Color(0xE61C1C1E)
 private val AppleBlue = Color(0xFF0A84FF)
@@ -124,7 +124,6 @@ object AppState {
     val isSearchExpanded = mutableStateOf(false)
     val stepIndex = mutableIntStateOf(0)
     
-    // Filtri Routing
     val avoidTolls = mutableStateOf(false)
     val avoidHighways = mutableStateOf(false)
     
@@ -197,7 +196,7 @@ private fun rememberSpeaker(): Pair<TextToSpeech?, Boolean> {
     return tts to ready
 }
 
-// Simulatore di movimento in galleria (Dead Reckoning)
+// Simulatore Dead Reckoning
 private fun simulateMovement(lastLoc: Location, timeDeltaMs: Long): Location {
     val distanceMeters = (lastLoc.speed) * (timeDeltaMs / 1000f)
     val r = 6371000.0
@@ -251,7 +250,6 @@ private fun App(client: FusedLocationProviderClient) {
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
     val rawGps = rememberGps(client, granted)
     
-    // Gestione Galleria
     var effectiveGps by remember { mutableStateOf<Location?>(null) }
     var isSimulating by remember { mutableStateOf(false) }
     
@@ -292,12 +290,10 @@ private fun App(client: FusedLocationProviderClient) {
     val remainingDistance = route?.steps?.drop(stepIndex)?.sumOf { it.distance } ?: 0.0
     val remainingDuration = route?.steps?.drop(stepIndex)?.sumOf { it.duration } ?: 0.0
 
-    // Auto-hide Tasto "Termina"
     LaunchedEffect(showStopButton, navigating) {
         if (navigating && showStopButton) { delay(10000); showStopButton = false }
     }
 
-    // Foreground Service Gestione
     LaunchedEffect(navigating) {
         val serviceIntent = Intent(context, NavigationService::class.java)
         if (navigating) {
@@ -392,14 +388,12 @@ private fun App(client: FusedLocationProviderClient) {
                 NavMap(effectiveGps, place, route, navigating, followUser, speed, isSimulating)
             }
             
-            // Banner Simulazione GPS (Galleria)
             if (navigating && isSimulating) {
                 Surface(color = AlertAmber, shape = RectangleShape, modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter).padding(top = 24.dp)) {
                     Text("SEGNALE GPS PERSO - SIMULAZIONE IN CORSO", color = DarkBackground, fontWeight = FontWeight.Bold, fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(8.dp))
                 }
             }
 
-            // --- UI PRINCIPALE (LAYOUT SQUADRATO E COMPATTO) ---
             Box(Modifier.fillMaxSize().systemBarsPadding().padding(16.dp)) {
                 if (isLandscape) {
                     Column(modifier = Modifier.fillMaxHeight().widthIn(max = 340.dp), verticalArrangement = Arrangement.SpaceBetween) {
@@ -606,7 +600,6 @@ private fun SearchExpandedCard(
                 TextButton(onClick = onClose) { Text("CHIUDI", color = AppleBlue, fontSize = 13.sp) }
             }
             
-            // Checkbox di instradamento
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { onTollsChange(!avoidTolls) }) {
                     Checkbox(checked = avoidTolls, onCheckedChange = onTollsChange, colors = CheckboxDefaults.colors(checkedColor = AppleBlue, uncheckedColor = TextGray))
