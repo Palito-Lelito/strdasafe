@@ -1,19 +1,29 @@
-# StradaSafe Liguria v0.6
+# StradaSafe 🧭
 
-Versione GitHub-ready compilabile senza Android Studio.
+StradaSafe è un'applicazione di navigazione Android open-source, progettata originariamente per le complesse reti viarie della Liguria. È costruita con un'architettura **"Zero-Account"**, focalizzata al 100% sulla privacy dell'utente e sull'efficienza alla guida.
 
-## Novità
-- aggiornamenti GPS continui ad alta precisione
-- indicazioni progressive ricavate dal percorso
-- voce italiana tramite sintesi vocale del dispositivo
-- pulsante audio
-- ricalcolo automatico dopo una deviazione superiore a circa 65 metri
-- orario stimato di arrivo, distanza e velocità GPS
-- schermo mantenuto acceso durante l'uso
-- interfaccia di navigazione più leggibile
+L'interfaccia utente è disegnata seguendo i principi del **Brutalismo Digitale** e del **Liquid Glassmorphism**: nessun fronzolo, geometrie squadrate, massima leggibilità sotto la luce del sole e zero distrazioni durante la marcia.
 
-## Generare l'APK
-Caricare il contenuto nella radice del repository, aprire Actions e avviare `Build StradaSafe APK`. Scaricare l'artefatto `StradaSafe-Liguria-v0.6`.
+## ✨ Funzionalità Principali
 
-## Limiti
-La v0.6 richiede Internet per mappa, ricerca e routing. Non contiene ancora mappe offline, traffico, limiti stradali verificati o database ufficiale di autovelox/Tutor. Il simbolo del limite mostra `–` appositamente, finché il limite reale non è disponibile. Seguire sempre segnaletica e Codice della strada.
+*   **Routing Avanzato (ORS):** Motore di calcolo basato su OpenRouteService. Supporta il routing dinamico con esclusione rigorosa di Autostrade e Pedaggi.
+*   **Dead Reckoning (Simulazione Galleria):** Algoritmo vettoriale integrato. Quando il segnale GPS viene perso (es. nei lunghi trafori appenninici), l'app calcola e simula l'avanzamento del veicolo basandosi sull'ultima velocità e direzione registrate.
+*   **Navigazione in Background (Foreground Service):** Il GPS e le indicazioni vocali TTS (Text-to-Speech) non si interrompono mai, nemmeno spegnendo lo schermo o ricevendo una telefonata.
+*   **Calcolo Tutor e Velox:** Monitoraggio in tempo reale della velocità media all'interno delle zone Tutor e avvisi spaziali intelligenti (segnala solo i pericoli fisicamente presenti sulla tua rotta, ignorando le strade parallele).
+*   **Interfaccia Adattiva:** Layout a isole fluttuanti (Floating Islands) per massimizzare l'area visibile della mappa. Transizione fluida e riposizionamento dinamico degli elementi passando dalla modalità Portrait a quella Landscape.
+*   **Privacy First:** Nessuna registrazione richiesta. Nessun log utente. 
+
+## 🛠 Stack Tecnologico
+
+*   **Linguaggio:** Kotlin
+*   **UI Toolkit:** Jetpack Compose (Material 3)
+*   **Motore Cartografico:** MapLibre GL Android (Mappe vettoriali leggere e personalizzabili)
+*   **Dati Cartografici:** OpenStreetMap (OSM) via OpenFreeMap
+*   **Motore di Routing:** OpenRouteService (API REST in POST)
+*   **Servizi Posizione:** Google Fused Location Provider
+
+## 🚀 Installazione e Build
+
+1. Clona il repository:
+   ```bash
+   git clone [https://github.com/Palito-Lelito/strdasafe.git](https://github.com/Palito-Lelito/strdasafe.git)
