@@ -72,7 +72,7 @@ import java.util.Locale
 import kotlin.math.*
 
 // INSERISCI QUI LA TUA CHIAVE OPENROUTESERVICE
-private const val ORS_API_KEY = eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImZjZDcxY2MyNmJiNjQwYzU4OTIzZDY0ZGE2MDEyMWJiIiwiaCI6Im11cm11cjY0In0=
+private const val ORS_API_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImZjZDcxY2MyNmJiNjQwYzU4OTIzZDY0ZGE2MDEyMWJiIiwiaCI6Im11cm11cjY0In0="
 
 // --- SERVIZIO IN BACKGROUND PER GPS A SCHERMO SPENTO ---
 class NavigationService : Service() {
