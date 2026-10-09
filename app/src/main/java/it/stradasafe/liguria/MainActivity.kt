@@ -2,6 +2,7 @@ package it.stradasafe.liguria
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -10,10 +11,12 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.location.Location
+import android.media.AudioAttributes
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.speech.tts.TextToSpeech
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -57,8 +60,10 @@ import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
-import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.SymbolLayer
+import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory.*
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
@@ -163,12 +168,16 @@ private fun rememberGps(client: FusedLocationProviderClient, granted: Boolean): 
         if (!granted) return@DisposableEffect onDispose {}
         val cb = object : LocationCallback() {
             override fun onLocationResult(r: LocationResult) {
-                r.lastLocation?.let { location = it }
+                r.lastLocation?.let { 
+                    if (it.accuracy < 40f) {
+                        location = it 
+                    }
+                }
             }
         }
-        val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000)
-            .setMinUpdateIntervalMillis(1000)
-            .setMinUpdateDistanceMeters(1f)
+        val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1500)
+            .setMinUpdateIntervalMillis(1500)
+            .setMinUpdateDistanceMeters(2f)
             .build()
         client.requestLocationUpdates(req, cb, null)
         onDispose { client.removeLocationUpdates(cb) }
@@ -187,6 +196,14 @@ private fun rememberSpeaker(): Pair<TextToSpeech?, Boolean> {
         engine = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 engine?.language = Locale.ITALIAN
+                
+                engine?.setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                
                 ready = true
             }
         }
@@ -214,9 +231,92 @@ private fun simulateMovement(lastLoc: Location, timeDeltaMs: Long): Location {
     }
 }
 
+// CALAMITA MATEMATICA: Route Snapping
+private fun snapToRoute(lat: Double, lon: Double, routePts: List<Point>): Pair<Double, Double> {
+    if (routePts.isEmpty()) return lat to lon
+    var minDistance = Double.MAX_VALUE
+    var snappedLat = lat
+    var snappedLon = lon
+    
+    val cosLat = cos(Math.toRadians(lat))
+
+    for (i in 0 until routePts.size - 1) {
+        val p1 = routePts[i]
+        val p2 = routePts[i+1]
+        
+        val x0 = lon * cosLat; val y0 = lat
+        val x1 = p1.longitude() * cosLat; val y1 = p1.latitude()
+        val x2 = p2.longitude() * cosLat; val y2 = p2.latitude()
+
+        val dx = x2 - x1
+        val dy = y2 - y1
+        
+        if (dx == 0.0 && dy == 0.0) continue
+
+        val t = ((x0 - x1) * dx + (y0 - y1) * dy) / (dx * dx + dy * dy)
+        
+        val closestX = when {
+            t < 0 -> x1
+            t > 1 -> x2
+            else -> x1 + t * dx
+        }
+        val closestY = when {
+            t < 0 -> y1
+            t > 1 -> y2
+            else -> y1 + t * dy
+        }
+
+        val projLon = closestX / cosLat
+        val projLat = closestY
+
+        val d = distanceMeters(lat, lon, projLat, projLon)
+        if (d < minDistance) {
+            minDistance = d
+            snappedLat = projLat
+            snappedLon = projLon
+        }
+    }
+    
+    return if (minDistance < 50.0) snappedLat to snappedLon else lat to lon
+}
+
+// DISEGNATORE DELLA FRECCIA DI NAVIGAZIONE
+private fun createArrowBitmap(colorHex: String): android.graphics.Bitmap {
+    val size = 96
+    val bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bitmap)
+    
+    // Disegna il triangolo (Chevron)
+    val path = android.graphics.Path().apply {
+        moveTo(size / 2f, 8f)           // Punta superiore
+        lineTo(size - 12f, size - 12f)  // Angolo in basso a destra
+        lineTo(size / 2f, size - 28f)   // Rientranza in basso al centro
+        lineTo(12f, size - 12f)         // Angolo in basso a sinistra
+        close()
+    }
+    
+    // Riempi di colore
+    canvas.drawPath(path, android.graphics.Paint().apply {
+        color = android.graphics.Color.parseColor(colorHex)
+        style = android.graphics.Paint.Style.FILL
+        isAntiAlias = true
+    })
+    
+    // Aggiungi un bordo bianco per staccare dalla mappa
+    canvas.drawPath(path, android.graphics.Paint().apply {
+        color = android.graphics.Color.WHITE
+        style = android.graphics.Paint.Style.STROKE
+        strokeWidth = 6f
+        isAntiAlias = true
+    })
+    
+    return bitmap
+}
+
 @Composable
 private fun App(client: FusedLocationProviderClient) {
     val context = LocalContext.current
+    val activity = context as? Activity
     val scope = rememberCoroutineScope()
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -253,6 +353,15 @@ private fun App(client: FusedLocationProviderClient) {
     var effectiveGps by remember { mutableStateOf<Location?>(null) }
     var isSimulating by remember { mutableStateOf(false) }
     
+    DisposableEffect(navigating) {
+        if (navigating) {
+            activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose { activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+    }
+    
     LaunchedEffect(rawGps, navigating) {
         if (rawGps != null) {
             effectiveGps = rawGps
@@ -265,7 +374,7 @@ private fun App(client: FusedLocationProviderClient) {
             delay(1000)
             if (effectiveGps != null) {
                 val timeSinceLastGps = System.currentTimeMillis() - effectiveGps!!.time
-                if (timeSinceLastGps > 3000 && effectiveGps!!.speed > 2f) {
+                if (timeSinceLastGps > 12000 && effectiveGps!!.speed > 3f) {
                     isSimulating = true
                     effectiveGps = simulateMovement(effectiveGps!!, 1000)
                     effectiveGps!!.time = System.currentTimeMillis()
@@ -357,8 +466,8 @@ private fun App(client: FusedLocationProviderClient) {
             }
         }
 
-        val offRoute = distanceToPolyline(effectiveGps!!.latitude, effectiveGps!!.longitude, route!!.points) > 50
-        if (offRoute && !isSimulating && effectiveGps!!.accuracy < 40f && currentTime - lastReroute > 10000) {
+        val offRoute = distanceToPolyline(effectiveGps!!.latitude, effectiveGps!!.longitude, route!!.points) > 80
+        if (offRoute && !isSimulating && effectiveGps!!.accuracy < 30f && currentTime - lastReroute > 15000) {
             lastReroute = currentTime
             scope.launch {
                 try {
@@ -735,7 +844,6 @@ private fun MetricDashboard(value: String, unit: String, color: Color, modifier:
     Text(unit, color = TextGray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
 }
 
-// Logica per le icone di svolta di OpenRouteService
 private fun getOrsManeuverSymbol(type: Int?): String = when (type) {
     0, 2, 4, 12 -> "↰"
     1, 3, 5, 13 -> "↱"
@@ -752,6 +860,8 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
     val mapView = remember { MapView(context) }
     var ready by remember { mutableStateOf(false) }
     var fitted by remember { mutableStateOf(false) }
+    
+    var lastValidBearing by remember { mutableDoubleStateOf(0.0) }
 
     val paddingLeft = if (isLandscape && navigating) with(density) { 360.dp.toPx().toInt() } else 0
     val paddingTop = if (!isLandscape && navigating) with(density) { 100.dp.toPx().toInt() } else 0
@@ -764,8 +874,20 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                 getMapAsync { map ->
                     map.cameraPosition = CameraPosition.Builder().target(LatLng(44.4, 8.9)).zoom(8.3).build()
                     map.setStyle(Style.Builder().fromUri(STYLE_URL)) { s ->
+                        
+                        // Generazione delle Frecce (Blu standard e Ambra per simulazione galleria)
+                        s.addImage("arrow_blue", createArrowBitmap("#0A84FF"))
+                        s.addImage("arrow_amber", createArrowBitmap("#FF9F0A"))
+
                         s.addSource(GeoJsonSource("gps"))
-                        s.addLayer(CircleLayer("gps-l", "gps").withProperties(circleRadius(10f), circleColor("#0A84FF"), circleStrokeColor("#FFFFFF"), circleStrokeWidth(3f)))
+                        
+                        // Inseriamo la freccia vettoriale al posto del vecchio pallino
+                        s.addLayer(SymbolLayer("gps-l", "gps").withProperties(
+                            iconImage("arrow_blue"),
+                            iconAllowOverlap(true),
+                            iconIgnorePlacement(true),
+                            iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP)
+                        ))
 
                         s.addSource(GeoJsonSource("dest"))
                         s.addLayer(CircleLayer("dest-l", "dest").withProperties(circleRadius(9f), circleColor("#32D74B")))
@@ -786,9 +908,25 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                 
                 m.setPadding(paddingLeft, paddingTop, 0, paddingBottom)
 
-                location?.let { 
-                    m.style?.getSourceAs<GeoJsonSource>("gps")?.setGeoJson(Feature.fromGeometry(Point.fromLngLat(it.longitude, it.latitude))) 
-                    m.style?.getLayerAs<CircleLayer>("gps-l")?.setProperties(circleColor(if (isSimulating) "#FF9F0A" else "#0A84FF"))
+                // Aggiornamento della memoria di rotazione (Bussola ferma al semaforo)
+                if (location != null && location.hasBearing() && speed > 5) {
+                    lastValidBearing = location.bearing.toDouble()
+                }
+
+                val snap = if (navigating && route != null && location != null) {
+                    snapToRoute(location.latitude, location.longitude, route.points)
+                } else null
+                
+                val dLat = snap?.first ?: location?.latitude
+                val dLon = snap?.second ?: location?.longitude
+
+                // Disegno della freccia sulla mappa, facendola ruotare col valore del bearing
+                if (dLat != null && dLon != null) {
+                    m.style?.getSourceAs<GeoJsonSource>("gps")?.setGeoJson(Feature.fromGeometry(Point.fromLngLat(dLon, dLat))) 
+                    m.style?.getLayerAs<SymbolLayer>("gps-l")?.setProperties(
+                        iconImage(if (isSimulating) "arrow_amber" else "arrow_blue"),
+                        iconRotate(lastValidBearing.toFloat())
+                    )
                 }
                 
                 if (place != null) {
@@ -817,7 +955,7 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                 }
                 m.style?.getSourceAs<GeoJsonSource>("safety")?.setGeoJson(FeatureCollection.fromFeatures(safetyPoints))
 
-                if (navigating && followUser && location != null) {
+                if (navigating && followUser && dLat != null && dLon != null) {
                     val targetZoom = when {
                         speed > 90 -> 15.0
                         speed > 50 -> 16.5
@@ -826,9 +964,9 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                     val targetTilt = if (speed > 80) 60.0 else 45.0
 
                     val pos = CameraPosition.Builder()
-                        .target(LatLng(location.latitude, location.longitude))
+                        .target(LatLng(dLat, dLon))
                         .zoom(targetZoom)
-                        .bearing(if (location.hasBearing()) location.bearing.toDouble() else 0.0)
+                        .bearing(lastValidBearing)
                         .tilt(targetTilt)
                         .build()
                         
@@ -847,7 +985,6 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
 
 private suspend fun searchPlaces(q: String): List<Place> = withContext(Dispatchers.IO) {
     val e = URLEncoder.encode(q, "UTF-8")
-    // Usiamo il classico motore GET di Nominatim per la ricerca dell'indirizzo
     val c = (URL("$SEARCH_BASE/search?q=$e&format=jsonv2&limit=5&countrycodes=it&viewbox=7.45,44.75,10.10,43.70&bounded=1").openConnection() as HttpURLConnection).apply {
         connectTimeout = 15000; readTimeout = 20000; requestMethod = "GET"
         setRequestProperty("User-Agent", "StradaSafeLiguria/1.1")
@@ -870,18 +1007,15 @@ private suspend fun searchPlaces(q: String): List<Place> = withContext(Dispatche
     list
 }
 
-// --- NUOVO MOTORE DI ROUTING (OPENROUTESERVICE in modalità POST) ---
 private suspend fun fetchRoute(l: Location, p: Place, avoidTolls: Boolean, avoidHighways: Boolean): RouteData = withContext(Dispatchers.IO) {
-    
     val urlStr = "https://api.openrouteservice.org/v2/directions/driving-car/geojson"
     
-    // Costruzione del JSON Payload per forzare le esclusioni
     val jsonBody = JSONObject().apply {
         put("coordinates", JSONArray().apply {
             put(JSONArray().apply { put(l.longitude); put(l.latitude) })
             put(JSONArray().apply { put(p.lon); put(p.lat) })
         })
-        put("language", "it") // La sintesi vocale sarà in italiano nativo
+        put("language", "it")
         put("instructions", true)
         
         val avoids = JSONArray()
@@ -906,7 +1040,6 @@ private suspend fun fetchRoute(l: Location, p: Place, avoidTolls: Boolean, avoid
     }
     
     try {
-        // Invio dei dati
         c.outputStream.use { os ->
             val input = jsonBody.toString().toByteArray(Charsets.UTF_8)
             os.write(input, 0, input.size)
@@ -923,7 +1056,6 @@ private suspend fun fetchRoute(l: Location, p: Place, avoidTolls: Boolean, avoid
 
         val feature = root.getJSONArray("features").getJSONObject(0)
         
-        // Estraggo i punti della polyline blu
         val coords = feature.getJSONObject("geometry").getJSONArray("coordinates")
         val pts = (0 until coords.length()).map { 
             val a = coords.getJSONArray(it)
@@ -934,7 +1066,6 @@ private suspend fun fetchRoute(l: Location, p: Place, avoidTolls: Boolean, avoid
         val props = feature.getJSONObject("properties")
         val summary = props.getJSONObject("summary")
         
-        // Estraggo le istruzioni turn-by-turn
         val segments = props.getJSONArray("segments")
         for (i in 0 until segments.length()) {
             val segSteps = segments.getJSONObject(i).getJSONArray("steps")
