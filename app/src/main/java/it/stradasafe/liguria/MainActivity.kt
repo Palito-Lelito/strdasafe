@@ -168,9 +168,22 @@ private fun rememberGps(client: FusedLocationProviderClient, granted: Boolean): 
         if (!granted) return@DisposableEffect onDispose {}
         val cb = object : LocationCallback() {
             override fun onLocationResult(r: LocationResult) {
-                r.lastLocation?.let { 
-                    if (it.accuracy < 40f) {
-                        location = it 
+                r.lastLocation?.let { newLoc ->
+                    if (newLoc.accuracy < 40f) {
+                        
+                        // FILTRO ANTI-TELETRASPORTO (Ignora i balzi finti del Wi-Fi Hotspot)
+                        val currentLoc = location
+                        if (currentLoc != null) {
+                            val timeDelta = (newLoc.time - currentLoc.time) / 1000f // secondi passati
+                            val dist = currentLoc.distanceTo(newLoc) // metri percorsi
+                            
+                            // Se il salto implica una velocità superiore ai 200 km/h (> 55 metri al secondo)
+                            // è fisicamente impossibile, quindi è un errore del Wi-Fi: IGNORALO.
+                            if (timeDelta > 0 && (dist / timeDelta) > 55f) {
+                                return@let 
+                            }
+                        }
+                        location = newLoc 
                     }
                 }
             }
@@ -286,23 +299,20 @@ private fun createArrowBitmap(colorHex: String): android.graphics.Bitmap {
     val bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
     val canvas = android.graphics.Canvas(bitmap)
     
-    // Disegna il triangolo (Chevron)
     val path = android.graphics.Path().apply {
-        moveTo(size / 2f, 8f)           // Punta superiore
-        lineTo(size - 12f, size - 12f)  // Angolo in basso a destra
-        lineTo(size / 2f, size - 28f)   // Rientranza in basso al centro
-        lineTo(12f, size - 12f)         // Angolo in basso a sinistra
+        moveTo(size / 2f, 8f)           
+        lineTo(size - 12f, size - 12f)  
+        lineTo(size / 2f, size - 28f)   
+        lineTo(12f, size - 12f)         
         close()
     }
     
-    // Riempi di colore
     canvas.drawPath(path, android.graphics.Paint().apply {
         color = android.graphics.Color.parseColor(colorHex)
         style = android.graphics.Paint.Style.FILL
         isAntiAlias = true
     })
     
-    // Aggiungi un bordo bianco per staccare dalla mappa
     canvas.drawPath(path, android.graphics.Paint().apply {
         color = android.graphics.Color.WHITE
         style = android.graphics.Paint.Style.STROKE
@@ -875,13 +885,11 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                     map.cameraPosition = CameraPosition.Builder().target(LatLng(44.4, 8.9)).zoom(8.3).build()
                     map.setStyle(Style.Builder().fromUri(STYLE_URL)) { s ->
                         
-                        // Generazione delle Frecce (Blu standard e Ambra per simulazione galleria)
                         s.addImage("arrow_blue", createArrowBitmap("#0A84FF"))
                         s.addImage("arrow_amber", createArrowBitmap("#FF9F0A"))
 
                         s.addSource(GeoJsonSource("gps"))
                         
-                        // Inseriamo la freccia vettoriale al posto del vecchio pallino
                         s.addLayer(SymbolLayer("gps-l", "gps").withProperties(
                             iconImage("arrow_blue"),
                             iconAllowOverlap(true),
@@ -908,7 +916,6 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                 
                 m.setPadding(paddingLeft, paddingTop, 0, paddingBottom)
 
-                // Aggiornamento della memoria di rotazione (Bussola ferma al semaforo)
                 if (location != null && location.hasBearing() && speed > 5) {
                     lastValidBearing = location.bearing.toDouble()
                 }
@@ -920,7 +927,6 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                 val dLat = snap?.first ?: location?.latitude
                 val dLon = snap?.second ?: location?.longitude
 
-                // Disegno della freccia sulla mappa, facendola ruotare col valore del bearing
                 if (dLat != null && dLon != null) {
                     m.style?.getSourceAs<GeoJsonSource>("gps")?.setGeoJson(Feature.fromGeometry(Point.fromLngLat(dLon, dLat))) 
                     m.style?.getLayerAs<SymbolLayer>("gps-l")?.setProperties(
