@@ -171,14 +171,12 @@ private fun rememberGps(client: FusedLocationProviderClient, granted: Boolean): 
                 r.lastLocation?.let { newLoc ->
                     if (newLoc.accuracy < 40f) {
                         
-                        // FILTRO ANTI-TELETRASPORTO (Ignora i balzi finti del Wi-Fi Hotspot)
+                        // FILTRO ANTI-TELETRASPORTO
                         val currentLoc = location
                         if (currentLoc != null) {
-                            val timeDelta = (newLoc.time - currentLoc.time) / 1000f // secondi passati
-                            val dist = currentLoc.distanceTo(newLoc) // metri percorsi
+                            val timeDelta = (newLoc.time - currentLoc.time) / 1000f
+                            val dist = currentLoc.distanceTo(newLoc)
                             
-                            // Se il salto implica una velocità superiore ai 200 km/h (> 55 metri al secondo)
-                            // è fisicamente impossibile, quindi è un errore del Wi-Fi: IGNORALO.
                             if (timeDelta > 0 && (dist / timeDelta) > 55f) {
                                 return@let 
                             }
@@ -188,10 +186,13 @@ private fun rememberGps(client: FusedLocationProviderClient, granted: Boolean): 
                 }
             }
         }
-        val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1500)
-            .setMinUpdateIntervalMillis(1500)
-            .setMinUpdateDistanceMeters(2f)
+        
+        // MODIFICA TEMPO REALE ESTREMO: 100 millisecondi
+        val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 100)
+            .setMinUpdateIntervalMillis(100)
+            .setMinUpdateDistanceMeters(0f)
             .build()
+            
         client.requestLocationUpdates(req, cb, null)
         onDispose { client.removeLocationUpdates(cb) }
     }
@@ -976,7 +977,8 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                         .tilt(targetTilt)
                         .build()
                         
-                    m.animateCamera(CameraUpdateFactory.newCameraPosition(pos), 1000)
+                    // MODIFICA TEMPO REALE ESTREMO: Animazione di 100 millisecondi
+                    m.animateCamera(CameraUpdateFactory.newCameraPosition(pos), 100)
                 }
             }
         },
