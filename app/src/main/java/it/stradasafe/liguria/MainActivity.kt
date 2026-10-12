@@ -146,7 +146,7 @@ object AppState {
     val tutorStartDistanceRemaining = mutableDoubleStateOf(0.0)
 }
 
-// Struttura per gestire l'animazione fluida a 60fps senza pesare sul processore
+// Struttura per gestire l'animazione fluida a 60fps
 class AnimationState {
     var animator: ValueAnimator? = null
     var lat: Double = Double.NaN
@@ -198,7 +198,7 @@ private fun rememberGps(client: FusedLocationProviderClient, granted: Boolean): 
             }
         }
         
-        // COMPROMESSO PERFETTO: Il GPS richiede i dati ogni 500 millisecondi
+        // COMPROMESSO PERFETTO: 500 millisecondi
         val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 500)
             .setMinUpdateIntervalMillis(500)
             .setMinUpdateDistanceMeters(0f)
@@ -395,10 +395,15 @@ private fun App(client: FusedLocationProviderClient) {
         if (navigating && showStopButton) { delay(10000); showStopButton = false }
     }
 
+    // SCUDO ANTI-CRASH: Evita che Huawei chiuda l'app se blocca il Background Service
     LaunchedEffect(navigating) {
-        val serviceIntent = Intent(context, NavigationService::class.java)
-        if (navigating) ContextCompat.startForegroundService(context, serviceIntent)
-        else { serviceIntent.action = "STOP"; context.startService(serviceIntent) }
+        try {
+            val serviceIntent = Intent(context, NavigationService::class.java)
+            if (navigating) ContextCompat.startForegroundService(context, serviceIntent)
+            else { serviceIntent.action = "STOP"; context.startService(serviceIntent) }
+        } catch (e: Exception) {
+            // Ignora il crash silenziosamente se il sistema impedisce l'avvio
+        }
     }
 
     LaunchedEffect(effectiveGps, navigating, route) {
@@ -812,7 +817,6 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                 val dLat = snap?.first ?: location?.latitude
                 val dLon = snap?.second ?: location?.longitude
 
-                // MOTORE DI ANIMAZIONE SINCRONIZZATO A 500 MILLISECONDI
                 if (dLat != null && dLon != null) {
                     val targetLat = dLat
                     val targetLon = dLon
@@ -836,7 +840,7 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                         animState.animator?.cancel()
 
                         val anim = ValueAnimator.ofFloat(0f, 1f)
-                        anim.duration = 500 // SINCRONIZZATO a 500ms come il GPS
+                        anim.duration = 500 
                         anim.interpolator = LinearInterpolator()
                         anim.addUpdateListener { a ->
                             val f = a.animatedFraction
@@ -861,7 +865,9 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                                 val targetZoom = when { speed > 90 -> 15.0; speed > 50 -> 16.5; else -> 17.5 }
                                 val targetTilt = if (speed > 80) 60.0 else 45.0
                                 val pos = CameraPosition.Builder().target(LatLng(currentLat, currentLon)).zoom(targetZoom).bearing(currentBearing).tilt(targetTilt).build()
-                                m.easeCamera(CameraUpdateFactory.newCameraPosition(pos), 0, false)
+                                
+                                // FIX ANTI-CRASH: Usiamo moveCamera al posto di easeCamera per evitare il blocco del motore grafico
+                                m.moveCamera(CameraUpdateFactory.newCameraPosition(pos))
                             }
                         }
                         anim.start()
