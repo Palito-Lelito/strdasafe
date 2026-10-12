@@ -1,78 +1,935 @@
 {
   "schema": 1,
   "territory": "Liguria",
-  "updated_at": "2026-09-30",
+  "updated_at": "2026-10-12",
   "status": "DEMO_ONLY",
   "devices": [
-    { "id": "tutor-ge-sopraelevata-ponente-start", "type": "Tutor", "lat": 44.40114, "lon": 8.94052, "speed_limit": 60 },
-    { "id": "tutor-ge-sopraelevata-ponente-end", "type": "Tutor", "lat": 44.40865, "lon": 8.90381, "speed_limit": 60 },
-    { "id": "tutor-ge-sopraelevata-levante-start", "type": "Tutor", "lat": 44.40875, "lon": 8.90391, "speed_limit": 60 },
-    { "id": "tutor-ge-sopraelevata-levante-end", "type": "Tutor", "lat": 44.40124, "lon": 8.94042, "speed_limit": 60 },
-    { "id": "tutor-ge-canepa-ponente-start", "type": "Tutor", "lat": 44.40825, "lon": 8.89901, "speed_limit": 70 },
-    { "id": "tutor-ge-canepa-ponente-end", "type": "Tutor", "lat": 44.41015, "lon": 8.88721, "speed_limit": 70 },
-    { "id": "tutor-ge-canepa-levante-start", "type": "Tutor", "lat": 44.41020, "lon": 8.88730, "speed_limit": 70 },
-    { "id": "tutor-ge-canepa-levante-end", "type": "Tutor", "lat": 44.40830, "lon": 8.89910, "speed_limit": 70 },
-    { "id": "tutor-ge-guidorossa-ponente-start", "type": "Tutor", "lat": 44.40938, "lon": 8.88377, "speed_limit": 70 },
-    { "id": "tutor-ge-guidorossa-ponente-end", "type": "Tutor", "lat": 44.41505, "lon": 8.85970, "speed_limit": 70 },
-
-    { "id": "velox-ge-europa-timavo", "type": "Autovelox Fisso", "lat": 44.40145, "lon": 8.97230, "speed_limit": 60 },
-    { "id": "velox-ge-europa-quarto", "type": "Autovelox Fisso", "lat": 44.38920, "lon": 8.99515, "speed_limit": 60 },
-    { "id": "velox-ge-brigate-partigiane", "type": "Autovelox Fisso", "lat": 44.39850, "lon": 8.94410, "speed_limit": 50 },
-    { "id": "velox-ge-adamoli", "type": "Autovelox Fisso", "lat": 44.44420, "lon": 8.97410, "speed_limit": 50 },
-    { "id": "velox-ge-pedulla", "type": "Autovelox Fisso", "lat": 44.45330, "lon": 8.99550, "speed_limit": 50 },
-    { "id": "velox-ge-don-sturzo", "type": "Autovelox Fisso", "lat": 44.39650, "lon": 8.96600, "speed_limit": 50 },
-    { "id": "velox-ge-monte-grappa", "type": "Autovelox Fisso", "lat": 44.41210, "lon": 8.94820, "speed_limit": 50 },
-
-    { "id": "tred-ge-cantore", "type": "Semaforo Controllato", "lat": 44.41005, "lon": 8.89505 },
-    { "id": "tred-ge-tolemaide", "type": "Semaforo Controllato", "lat": 44.40220, "lon": 8.95350 },
-    { "id": "tred-ge-isonzo", "type": "Semaforo Controllato", "lat": 44.39890, "lon": 8.97740 },
-    { "id": "tred-ge-cavallotti", "type": "Semaforo Controllato", "lat": 44.39050, "lon": 8.97520 },
-
-    { "id": "tutor-a10-celle-ponente-start", "type": "Tutor", "lat": 44.35415, "lon": 8.52835, "speed_limit": 110 },
-    { "id": "tutor-a10-albisola-ponente-end", "type": "Tutor", "lat": 44.33505, "lon": 8.50205, "speed_limit": 110 },
-    { "id": "tutor-a10-albisola-levante-start", "type": "Tutor", "lat": 44.33500, "lon": 8.50200, "speed_limit": 110 },
-    { "id": "tutor-a10-celle-levante-end", "type": "Tutor", "lat": 44.35410, "lon": 8.52830, "speed_limit": 110 },
-    
-    { "id": "tutor-a12-nervi-levante-start", "type": "Tutor", "lat": 44.38210, "lon": 9.04150, "speed_limit": 110 },
-    { "id": "tutor-a12-recco-levante-end", "type": "Tutor", "lat": 44.36720, "lon": 9.14120, "speed_limit": 110 },
-    { "id": "tutor-a12-rapallo-levante-start", "type": "Tutor", "lat": 44.34810, "lon": 9.21550, "speed_limit": 110 },
-    { "id": "tutor-a12-chiavari-levante-end", "type": "Tutor", "lat": 44.32920, "lon": 9.31750, "speed_limit": 110 },
-
-    { "id": "velox-a7-busalla", "type": "Autovelox Fisso", "lat": 44.57550, "lon": 8.95150, "speed_limit": 110 },
-    { "id": "velox-a7-isola-cantone", "type": "Autovelox Fisso", "lat": 44.63610, "lon": 8.96120, "speed_limit": 110 },
-    { "id": "velox-a26-masone", "type": "Autovelox Fisso", "lat": 44.51220, "lon": 8.69450, "speed_limit": 110 },
-
-    { "id": "velox-ss1-bogliasco", "type": "Autovelox Fisso", "lat": 44.38050, "lon": 9.06810, "speed_limit": 50 },
-    { "id": "velox-ss1-pieve", "type": "Autovelox Fisso", "lat": 44.37510, "lon": 9.08530, "speed_limit": 50 },
-    { "id": "velox-ss1-sori", "type": "Autovelox Fisso", "lat": 44.37120, "lon": 9.10250, "speed_limit": 50 },
-    { "id": "velox-ss1-recco", "type": "Autovelox Fisso", "lat": 44.36010, "lon": 9.14200, "speed_limit": 50 },
-    { "id": "velox-ss1-zoagli", "type": "Autovelox Fisso", "lat": 44.33850, "lon": 9.26420, "speed_limit": 50 },
-    { "id": "velox-ss1-sestri-levante", "type": "Autovelox Fisso", "lat": 44.27010, "lon": 9.40550, "speed_limit": 50 },
-    { "id": "velox-ss1-deiva", "type": "Autovelox Fisso", "lat": 44.22510, "lon": 9.51850, "speed_limit": 50 },
-
-    { "id": "velox-ss1-arenzano", "type": "Autovelox Fisso", "lat": 44.40210, "lon": 8.67550, "speed_limit": 50 },
-    { "id": "velox-ss1-cogoleto", "type": "Autovelox Fisso", "lat": 44.38820, "lon": 8.64120, "speed_limit": 50 },
-    { "id": "velox-ss1-varazze", "type": "Autovelox Fisso", "lat": 44.36150, "lon": 8.57520, "speed_limit": 50 },
-    { "id": "velox-nizza-savona", "type": "Autovelox Fisso", "lat": 44.28810, "lon": 8.45520, "speed_limit": 50 },
-    { "id": "velox-ss1-vado-ligure", "type": "Autovelox Fisso", "lat": 44.26210, "lon": 8.43550, "speed_limit": 50 },
-    { "id": "velox-ss1-spotorno", "type": "Autovelox Fisso", "lat": 44.22550, "lon": 8.41520, "speed_limit": 50 },
-    { "id": "velox-ss1-noli", "type": "Autovelox Fisso", "lat": 44.20510, "lon": 8.41450, "speed_limit": 50 },
-    { "id": "velox-ss1-varigotti", "type": "Autovelox Fisso", "lat": 44.18120, "lon": 8.38850, "speed_limit": 50 },
-    { "id": "velox-ss1-finale", "type": "Autovelox Fisso", "lat": 44.17050, "lon": 8.34150, "speed_limit": 50 },
-    { "id": "velox-ss1-pietra", "type": "Autovelox Fisso", "lat": 44.14810, "lon": 8.28520, "speed_limit": 50 },
-    { "id": "velox-ss1-loano", "type": "Autovelox Fisso", "lat": 44.12850, "lon": 8.25410, "speed_limit": 50 },
-    { "id": "velox-ss1-borghetto", "type": "Autovelox Fisso", "lat": 44.11050, "lon": 8.23450, "speed_limit": 50 },
-    { "id": "velox-ss1-ceriale", "type": "Autovelox Fisso", "lat": 44.08120, "lon": 8.22550, "speed_limit": 50 },
-    { "id": "velox-ss1-albenga", "type": "Autovelox Fisso", "lat": 44.04510, "lon": 8.21550, "speed_limit": 50 },
-    { "id": "velox-ss1-alassio", "type": "Autovelox Fisso", "lat": 44.01520, "lon": 8.16550, "speed_limit": 50 },
-    { "id": "velox-ss1-andora", "type": "Autovelox Fisso", "lat": 43.95120, "lon": 8.14050, "speed_limit": 50 },
-    { "id": "velox-ss1-cervo", "type": "Autovelox Fisso", "lat": 43.92550, "lon": 8.11550, "speed_limit": 50 },
-    { "id": "velox-ss1-diano", "type": "Autovelox Fisso", "lat": 43.90850, "lon": 8.08550, "speed_limit": 50 },
-    { "id": "velox-ss1-imperia", "type": "Autovelox Fisso", "lat": 43.88210, "lon": 8.03550, "speed_limit": 50 },
-    { "id": "velox-ss1-sanremo", "type": "Autovelox Fisso", "lat": 43.81550, "lon": 7.77550, "speed_limit": 50 },
-
-    { "id": "velox-sp-san-bartolomeo", "type": "Autovelox Fisso", "lat": 44.10250, "lon": 9.85120, "speed_limit": 50 },
-    { "id": "velox-sp-carducci", "type": "Autovelox Fisso", "lat": 44.11520, "lon": 9.83550, "speed_limit": 50 },
-    { "id": "velox-ss1-ricco-golfo", "type": "Autovelox Fisso", "lat": 44.15510, "lon": 9.76550, "speed_limit": 50 }
+    {
+      "id": "velox-bargagli-ss45-via-aimone-martini",
+      "type": "Autovelox Fisso",
+      "lat": 44.458982,
+      "lon": 9.091637
+    },
+    {
+      "id": "velox-bogliasco-via-aurelia",
+      "type": "Autovelox Fisso",
+      "lat": 44.378475,
+      "lon": 9.07289
+    },
+    {
+      "id": "velox-busalla-via-venticinque-aprile",
+      "type": "Autovelox Fisso",
+      "lat": 44.577582,
+      "lon": 8.941131
+    },
+    {
+      "id": "velox-camogli-ss1-via-aurelia-1",
+      "type": "Autovelox Fisso",
+      "lat": 44.356447,
+      "lon": 9.153954,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-camogli-ss1-via-aurelia-2",
+      "type": "Autovelox Fisso",
+      "lat": 44.350677,
+      "lon": 9.157583,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-camogli-ss1-via-aurelia-3",
+      "type": "Autovelox Fisso",
+      "lat": 44.346738,
+      "lon": 9.168812,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-camogli-ss1-via-aurelia-4",
+      "type": "Autovelox Fisso",
+      "lat": 44.347778,
+      "lon": 9.166568,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-casarza-ligure-via-quattro-novembre",
+      "type": "Autovelox Fisso",
+      "lat": 44.274982,
+      "lon": 9.457781
+    },
+    {
+      "id": "velox-cogoleto-passeggiata-aldo-moro-1",
+      "type": "Autovelox Fisso",
+      "lat": 44.390813,
+      "lon": 8.658685,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-cogoleto-passeggiata-aldo-moro-2",
+      "type": "Autovelox Fisso",
+      "lat": 44.390898,
+      "lon": 8.661523,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-cogoleto-passeggiata-aldo-moro-3",
+      "type": "Autovelox Fisso",
+      "lat": 44.390961,
+      "lon": 8.663632,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-cogoleto-via-30-ottobre-1943",
+      "type": "Autovelox Fisso",
+      "lat": 44.390179,
+      "lon": 8.648003
+    },
+    {
+      "id": "velox-cogoleto-via-aurelia-di-levante",
+      "type": "Autovelox Fisso",
+      "lat": 44.3908,
+      "lon": 8.655217,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-cogoleto-via-aurelia-di-ponente-1",
+      "type": "Autovelox Fisso",
+      "lat": 44.381152,
+      "lon": 8.633796,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-cogoleto-via-aurelia-di-ponente-2",
+      "type": "Autovelox Fisso",
+      "lat": 44.38386,
+      "lon": 8.637237,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-cogoleto-strada-senza-nome",
+      "type": "Autovelox Fisso",
+      "lat": 44.390229,
+      "lon": 8.650277,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-davagna-ss45",
+      "type": "Autovelox Fisso",
+      "lat": 44.465237,
+      "lon": 9.102969,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-genova-corso-europa-1",
+      "type": "Autovelox Fisso",
+      "lat": 44.395234,
+      "lon": 8.993625,
+      "speed_limit": 60
+    },
+    {
+      "id": "velox-genova-corso-europa-2",
+      "type": "Autovelox Fisso",
+      "lat": 44.395486,
+      "lon": 8.993621,
+      "speed_limit": 60
+    },
+    {
+      "id": "velox-genova-via-aurelia",
+      "type": "Autovelox Fisso",
+      "lat": 44.380474,
+      "lon": 9.058413
+    },
+    {
+      "id": "velox-lavagna-ss1-via-aurelia-1",
+      "type": "Autovelox Fisso",
+      "lat": 44.297833,
+      "lon": 9.364451,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-lavagna-ss1-via-aurelia-2",
+      "type": "Autovelox Fisso",
+      "lat": 44.302902,
+      "lon": 9.353013,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-lavagna-ss1-via-aurelia-3",
+      "type": "Autovelox Fisso",
+      "lat": 44.297609,
+      "lon": 9.364945,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-moneglia-ss1-via-aurelia-1",
+      "type": "Autovelox Fisso",
+      "lat": 44.257407,
+      "lon": 9.519746,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-moneglia-ss1-via-aurelia-2",
+      "type": "Autovelox Fisso",
+      "lat": 44.257865,
+      "lon": 9.517413,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-moneglia-ss1-via-aurelia-3",
+      "type": "Autovelox Fisso",
+      "lat": 44.258034,
+      "lon": 9.515692,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-moneglia-ss1-via-aurelia-4",
+      "type": "Autovelox Fisso",
+      "lat": 44.257979,
+      "lon": 9.509928,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-moneglia-ss1-via-aurelia-5",
+      "type": "Autovelox Fisso",
+      "lat": 44.258899,
+      "lon": 9.505052,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-moneglia-ss1-via-aurelia-6",
+      "type": "Autovelox Fisso",
+      "lat": 44.257717,
+      "lon": 9.502671,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-pieve-ligure-via-venticinque-aprile-1",
+      "type": "Autovelox Fisso",
+      "lat": 44.372761,
+      "lon": 9.091363,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-pieve-ligure-via-venticinque-aprile-2",
+      "type": "Autovelox Fisso",
+      "lat": 44.37261,
+      "lon": 9.096951,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-pieve-ligure-via-venticinque-aprile-3",
+      "type": "Autovelox Fisso",
+      "lat": 44.377279,
+      "lon": 9.079148,
+      "speed_limit": 50
+    },
+    {
+      "id": "tred-rapallo-corso-giacomo-matteotti",
+      "type": "Semaforo Controllato",
+      "lat": 44.349023,
+      "lon": 9.228776
+    },
+    {
+      "id": "tred-rapallo-via-della-liberta",
+      "type": "Semaforo Controllato",
+      "lat": 44.350838,
+      "lon": 9.224586
+    },
+    {
+      "id": "tred-rapallo-via-trento",
+      "type": "Semaforo Controllato",
+      "lat": 44.350879,
+      "lon": 9.224758
+    },
+    {
+      "id": "velox-recco-ss1-via-cavour-1",
+      "type": "Autovelox Fisso",
+      "lat": 44.362089,
+      "lon": 9.131446,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-recco-ss1-via-cavour-2",
+      "type": "Autovelox Fisso",
+      "lat": 44.360774,
+      "lon": 9.138451,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-recco-ss1-via-cavour-3",
+      "type": "Autovelox Fisso",
+      "lat": 44.362326,
+      "lon": 9.13478,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-recco-ss1-via-cavour-4",
+      "type": "Autovelox Fisso",
+      "lat": 44.362799,
+      "lon": 9.129557,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-recco-via-filippo-da-recco-1",
+      "type": "Autovelox Fisso",
+      "lat": 44.357478,
+      "lon": 9.146489,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-recco-via-filippo-da-recco-2",
+      "type": "Autovelox Fisso",
+      "lat": 44.358621,
+      "lon": 9.14763,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-santa-margherita-ligure-via-aurelia",
+      "type": "Autovelox Fisso",
+      "lat": 44.341238,
+      "lon": 9.210904,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-sestri-levante-via-del-petronio",
+      "type": "Autovelox Fisso",
+      "lat": 44.264552,
+      "lon": 9.425565
+    },
+    {
+      "id": "velox-sori-ss1-via-francesco-crispi",
+      "type": "Autovelox Fisso",
+      "lat": 44.366018,
+      "lon": 9.119849,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-torriglia-ss45-strada-statale-di-val-trebbia",
+      "type": "Autovelox Fisso",
+      "lat": 44.482361,
+      "lon": 9.12336,
+      "speed_limit": 70
+    },
+    {
+      "id": "velox-albisola-superiore-a10-autostrada-dei-fiori",
+      "type": "Autovelox Fisso",
+      "lat": 44.335437,
+      "lon": 8.514336,
+      "speed_limit": 110
+    },
+    {
+      "id": "velox-albisola-superiore-via-alessandria",
+      "type": "Autovelox Fisso",
+      "lat": 44.341061,
+      "lon": 8.511069,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-altare-strada-senza-nome",
+      "type": "Autovelox Fisso",
+      "lat": 44.337979,
+      "lon": 8.351438,
+      "speed_limit": 65
+    },
+    {
+      "id": "velox-andora-a10-autostrada-dei-fiori",
+      "type": "Autovelox Fisso",
+      "lat": 44.003596,
+      "lon": 8.130972,
+      "speed_limit": 100
+    },
+    {
+      "id": "velox-borghetto-santo-spirito-sp60-via-michelangelo",
+      "type": "Autovelox Fisso",
+      "lat": 44.113971,
+      "lon": 8.231594,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-borghetto-santo-spirito-ss1-corso-vittorio-veneto",
+      "type": "Autovelox Fisso",
+      "lat": 44.108984,
+      "lon": 8.241077,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-borgio-verezzi-via-aurelia",
+      "type": "Autovelox Fisso",
+      "lat": 44.156954,
+      "lon": 8.305854,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-calizzano-sp490-via-frassino",
+      "type": "Autovelox Fisso",
+      "lat": 44.234114,
+      "lon": 8.134506
+    },
+    {
+      "id": "tutor-celle-ligure-a10-galleria-terrizza",
+      "type": "Tutor",
+      "lat": 44.341609,
+      "lon": 8.537815,
+      "speed_limit": 110
+    },
+    {
+      "id": "velox-ceriale-a10-autostrada-dei-fiori",
+      "type": "Autovelox Fisso",
+      "lat": 44.100961,
+      "lon": 8.225665,
+      "speed_limit": 100
+    },
+    {
+      "id": "velox-ceriale-via-pineo-1",
+      "type": "Autovelox Fisso",
+      "lat": 44.076127,
+      "lon": 8.225995,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-ceriale-via-pineo-2",
+      "type": "Autovelox Fisso",
+      "lat": 44.080703,
+      "lon": 8.226561,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-finale-ligure-a10-autostrada-dei-fiori",
+      "type": "Autovelox Fisso",
+      "lat": 44.176218,
+      "lon": 8.294768
+    },
+    {
+      "id": "velox-noli-a10-autostrada-dei-fiori",
+      "type": "Autovelox Fisso",
+      "lat": 44.226083,
+      "lon": 8.383367,
+      "speed_limit": 110
+    },
+    {
+      "id": "velox-orco-feglino-a10-autostrada-dei-fiori",
+      "type": "Autovelox Fisso",
+      "lat": 44.2224,
+      "lon": 8.331386
+    },
+    {
+      "id": "velox-pietra-ligure-sp24-via-francesco-crispi",
+      "type": "Autovelox Fisso",
+      "lat": 44.15538,
+      "lon": 8.283495
+    },
+    {
+      "id": "velox-pietra-ligure-via-aurelia",
+      "type": "Autovelox Fisso",
+      "lat": 44.153682,
+      "lon": 8.294433,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-pontinvrea-via-giovo",
+      "type": "Autovelox Fisso",
+      "lat": 44.436537,
+      "lon": 8.448274,
+      "speed_limit": 50
+    },
+    {
+      "id": "tutor-savona-a10-autostrada-dei-fiori",
+      "type": "Tutor",
+      "lat": 44.323474,
+      "lon": 8.489254,
+      "speed_limit": 110
+    },
+    {
+      "id": "velox-savona-via-nazionale-piemonte-1",
+      "type": "Autovelox Fisso",
+      "lat": 44.327106,
+      "lon": 8.445705,
+      "speed_limit": 60
+    },
+    {
+      "id": "velox-savona-via-nazionale-piemonte-2",
+      "type": "Autovelox Fisso",
+      "lat": 44.326013,
+      "lon": 8.415357,
+      "speed_limit": 60
+    },
+    {
+      "id": "velox-stella-ss334",
+      "type": "Autovelox Fisso",
+      "lat": 44.404738,
+      "lon": 8.489989,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-varazze-a10-autostrada-dei-fiori",
+      "type": "Autovelox Fisso",
+      "lat": 44.353371,
+      "lon": 8.560072,
+      "speed_limit": 110
+    },
+    {
+      "id": "velox-bordighera-ss1-via-madonna-della-ruota-1",
+      "type": "Autovelox Fisso",
+      "lat": 43.792826,
+      "lon": 7.692657,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-bordighera-ss1-via-madonna-della-ruota-2",
+      "type": "Autovelox Fisso",
+      "lat": 43.799746,
+      "lon": 7.699432,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-bordighera-ss1-via-arziglia-1",
+      "type": "Autovelox Fisso",
+      "lat": 43.784542,
+      "lon": 7.679681,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-bordighera-ss1-via-arziglia-2",
+      "type": "Autovelox Fisso",
+      "lat": 43.780052,
+      "lon": 7.675044,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-bordighera-ss1-via-aurelia-1",
+      "type": "Autovelox Fisso",
+      "lat": 43.782121,
+      "lon": 7.651158,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-bordighera-ss1-via-vittorio-emanuele-ii",
+      "type": "Autovelox Fisso",
+      "lat": 43.780917,
+      "lon": 7.656163,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-bordighera-ss1-via-aurelia-2",
+      "type": "Autovelox Fisso",
+      "lat": 43.782116,
+      "lon": 7.651179,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-bordighera-via-romana",
+      "type": "Autovelox Fisso",
+      "lat": 43.783595,
+      "lon": 7.663146
+    },
+    {
+      "id": "velox-cervo-via-aurelia",
+      "type": "Autovelox Fisso",
+      "lat": 43.924541,
+      "lon": 8.1129,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-imperia-lungomare-amerigo-vespucci-1",
+      "type": "Autovelox Fisso",
+      "lat": 43.885869,
+      "lon": 8.030095,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-imperia-lungomare-amerigo-vespucci-2",
+      "type": "Autovelox Fisso",
+      "lat": 43.885798,
+      "lon": 8.030171,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-imperia-ss1-via-aurelia",
+      "type": "Autovelox Fisso",
+      "lat": 43.868496,
+      "lon": 7.999278,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-imperia-ss1-via-giacinto-menotti-serrati",
+      "type": "Autovelox Fisso",
+      "lat": 43.888147,
+      "lon": 8.048137,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-imperia-via-goffredo-alterisio",
+      "type": "Autovelox Fisso",
+      "lat": 43.897626,
+      "lon": 8.032896,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-imperia-via-nazionale",
+      "type": "Autovelox Fisso",
+      "lat": 43.901384,
+      "lon": 8.033141,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-ospedaletti-ss1-via-aurelia-di-levante",
+      "type": "Autovelox Fisso",
+      "lat": 43.799364,
+      "lon": 7.725284,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-ospedaletti-ss1-corso-regina-margherita-1",
+      "type": "Autovelox Fisso",
+      "lat": 43.802261,
+      "lon": 7.715629,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-ospedaletti-ss1-corso-regina-margherita-2",
+      "type": "Autovelox Fisso",
+      "lat": 43.801928,
+      "lon": 7.712067,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-sanremo-ss1-corso-guglielmo-marconi",
+      "type": "Autovelox Fisso",
+      "lat": 43.79921,
+      "lon": 7.741281,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-sanremo-ss1-corso-giuseppe-mazzini",
+      "type": "Autovelox Fisso",
+      "lat": 43.822695,
+      "lon": 7.813703,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-sanremo-ss1-bis-aurelia-bis",
+      "type": "Autovelox Fisso",
+      "lat": 43.830244,
+      "lon": 7.828151,
+      "speed_limit": 70
+    },
+    {
+      "id": "velox-santo-stefano-al-mare-ss1-via-aurelia-levante",
+      "type": "Autovelox Fisso",
+      "lat": 43.838214,
+      "lon": 7.899233,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-taggia-ss1-via-aurelia-ponente",
+      "type": "Autovelox Fisso",
+      "lat": 43.835101,
+      "lon": 7.850975,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-taggia-ss1-via-aurelia",
+      "type": "Autovelox Fisso",
+      "lat": 43.836506,
+      "lon": 7.863629,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-taggia-via-san-francesco",
+      "type": "Autovelox Fisso",
+      "lat": 43.84077,
+      "lon": 7.852647,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-ventimiglia-ss1-corso-francia",
+      "type": "Autovelox Fisso",
+      "lat": 43.794116,
+      "lon": 7.597471,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-ventimiglia-ss20-via-edmondo-de-amicis",
+      "type": "Autovelox Fisso",
+      "lat": 43.838784,
+      "lon": 7.586774,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-ventimiglia-ss20-del-colle-di-tenda-e-di-valle-roja",
+      "type": "Autovelox Fisso",
+      "lat": 43.803476,
+      "lon": 7.595704,
+      "speed_limit": 90
+    },
+    {
+      "id": "velox-ventimiglia-via-edmondo-de-amicis",
+      "type": "Autovelox Fisso",
+      "lat": 43.826634,
+      "lon": 7.584758,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-ameglia-ss432-1",
+      "type": "Autovelox Fisso",
+      "lat": 44.07114,
+      "lon": 9.964503,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-ameglia-ss432-2",
+      "type": "Autovelox Fisso",
+      "lat": 44.078921,
+      "lon": 9.961953,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-ameglia-ss432-3",
+      "type": "Autovelox Fisso",
+      "lat": 44.057747,
+      "lon": 9.981256,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-ameglia-ss432-via-venticinque-aprile",
+      "type": "Autovelox Fisso",
+      "lat": 44.064225,
+      "lon": 9.971893,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-arcola-via-aurelia",
+      "type": "Autovelox Fisso",
+      "lat": 44.109894,
+      "lon": 9.918678,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-bolano-ss330-del-buonviaggio-1",
+      "type": "Autovelox Fisso",
+      "lat": 44.162591,
+      "lon": 9.879813,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-bolano-ss330-del-buonviaggio-2",
+      "type": "Autovelox Fisso",
+      "lat": 44.162544,
+      "lon": 9.879821,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-bolano-via-italia",
+      "type": "Autovelox Fisso",
+      "lat": 44.165931,
+      "lon": 9.885483
+    },
+    {
+      "id": "velox-bolano-via-romana",
+      "type": "Autovelox Fisso",
+      "lat": 44.168993,
+      "lon": 9.885757
+    },
+    {
+      "id": "velox-castelnuovo-magra-ss1-aurelia-1",
+      "type": "Autovelox Fisso",
+      "lat": 44.076794,
+      "lon": 10.013147,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-castelnuovo-magra-ss1-aurelia-2",
+      "type": "Autovelox Fisso",
+      "lat": 44.077254,
+      "lon": 10.012734,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-castelnuovo-magra-ss1-aurelia-3",
+      "type": "Autovelox Fisso",
+      "lat": 44.082787,
+      "lon": 10.008221,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-deiva-marina-strada-senza-nome",
+      "type": "Autovelox Fisso",
+      "lat": 44.254101,
+      "lon": 9.553557
+    },
+    {
+      "id": "velox-la-spezia-strada-senza-nome-1",
+      "type": "Autovelox Fisso",
+      "lat": 44.113486,
+      "lon": 9.860266,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-la-spezia-strada-senza-nome-2",
+      "type": "Autovelox Fisso",
+      "lat": 44.113029,
+      "lon": 9.859764,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-luni-ss1-aurelia-1",
+      "type": "Autovelox Fisso",
+      "lat": 44.066275,
+      "lon": 10.031337,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-luni-ss1-aurelia-2",
+      "type": "Autovelox Fisso",
+      "lat": 44.065956,
+      "lon": 10.031859,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-santo-stefano-di-magra-ss62-della-cisa-1",
+      "type": "Autovelox Fisso",
+      "lat": 44.135807,
+      "lon": 9.935641,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-santo-stefano-di-magra-ss62-della-cisa-2",
+      "type": "Autovelox Fisso",
+      "lat": 44.139236,
+      "lon": 9.930453,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-santo-stefano-di-magra-ss62-via-cisa-nord",
+      "type": "Autovelox Fisso",
+      "lat": 44.167293,
+      "lon": 9.921348,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-santo-stefano-di-magra-ss62-della-cisa-3",
+      "type": "Autovelox Fisso",
+      "lat": 44.135947,
+      "lon": 9.935506,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-santo-stefano-di-magra-ss62-via-cisa-sud",
+      "type": "Autovelox Fisso",
+      "lat": 44.15856,
+      "lon": 9.917116,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-vezzano-ligure-ss1-1",
+      "type": "Autovelox Fisso",
+      "lat": 44.126405,
+      "lon": 9.892235,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-vezzano-ligure-ss1-2",
+      "type": "Autovelox Fisso",
+      "lat": 44.129378,
+      "lon": 9.894614,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-vezzano-ligure-ss330-del-buonviaggio-1",
+      "type": "Autovelox Fisso",
+      "lat": 44.153367,
+      "lon": 9.876951,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-vezzano-ligure-ss330-del-buonviaggio-2",
+      "type": "Autovelox Fisso",
+      "lat": 44.152736,
+      "lon": 9.87537,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-vezzano-ligure-strada-senza-nome",
+      "type": "Autovelox Fisso",
+      "lat": 44.125064,
+      "lon": 9.885792,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-genova-corso-europa-timavo",
+      "type": "Autovelox Fisso",
+      "lat": 44.398,
+      "lon": 8.985,
+      "speed_limit": 60
+    },
+    {
+      "id": "velox-genova-corso-europa-tagliamento",
+      "type": "Autovelox Fisso",
+      "lat": 44.3952,
+      "lon": 8.9936,
+      "speed_limit": 60
+    },
+    {
+      "id": "velox-genova-corso-europa-carrara",
+      "type": "Autovelox Fisso",
+      "lat": 44.3925,
+      "lon": 9.0065,
+      "speed_limit": 60
+    },
+    {
+      "id": "velox-genova-corso-europa-pio-parma",
+      "type": "Autovelox Fisso",
+      "lat": 44.3905,
+      "lon": 9.015,
+      "speed_limit": 60
+    },
+    {
+      "id": "velox-genova-corso-europa-mendoza",
+      "type": "Autovelox Fisso",
+      "lat": 44.388,
+      "lon": 9.0225,
+      "speed_limit": 60
+    },
+    {
+      "id": "velox-genova-via-polonio-20",
+      "type": "Autovelox Fisso",
+      "lat": 44.437,
+      "lon": 8.905,
+      "speed_limit": 50
+    },
+    {
+      "id": "tutor-genova-lungomare-canepa",
+      "type": "Tutor",
+      "lat": 44.4095,
+      "lon": 8.885,
+      "speed_limit": 70
+    },
+    {
+      "id": "tutor-genova-via-guido-rossa",
+      "type": "Tutor",
+      "lat": 44.412,
+      "lon": 8.868,
+      "speed_limit": 70
+    },
+    {
+      "id": "tutor-genova-strada-aldo-moro",
+      "type": "Tutor",
+      "lat": 44.404,
+      "lon": 8.928,
+      "speed_limit": 60
+    },
+    {
+      "id": "velox-genova-via-pra-70",
+      "type": "Autovelox Fisso",
+      "lat": 44.4282,
+      "lon": 8.779,
+      "speed_limit": 50
+    },
+    {
+      "id": "velox-genova-via-pra-1a",
+      "type": "Autovelox Fisso",
+      "lat": 44.4278,
+      "lon": 8.7915,
+      "speed_limit": 50
+    }
   ]
 }
