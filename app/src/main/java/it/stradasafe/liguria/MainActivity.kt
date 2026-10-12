@@ -786,16 +786,31 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                 getMapAsync { map ->
                     map.cameraPosition = CameraPosition.Builder().target(LatLng(44.4, 8.9)).zoom(8.3).build()
                     map.setStyle(Style.Builder().fromUri(STYLE_URL)) { s ->
+                        
+                        // Z-INDEX FIX: I layer in MapLibre vengono dipinti dal basso verso l'alto
+                        // 1. Dipingiamo il Percorso
+                        s.addSource(GeoJsonSource("route"))
+                        s.addLayer(LineLayer("route-l", "route").withProperties(lineColor("#64D2FF"), lineWidth(8f)))
+                        
+                        // 2. Dipingiamo la Destinazione
+                        s.addSource(GeoJsonSource("dest"))
+                        s.addLayer(CircleLayer("dest-l", "dest").withProperties(circleRadius(9f), circleColor("#32D74B")))
+                        
+                        // 3. Dipingiamo la Sicurezza (Tutor/Velox)
+                        s.addSource(GeoJsonSource("safety"))
+                        s.addLayer(CircleLayer("safety-l", "safety").withProperties(circleRadius(7f), circleColor("#FF453A"), circleStrokeColor("#FFFFFF"), circleStrokeWidth(2f)))
+
+                        // 4. Dipingiamo la FRECCIA per ultima! Così sarà SEMPRE sopra al percorso.
                         s.addImage("arrow_blue", createArrowBitmap("#0A84FF"))
                         s.addImage("arrow_amber", createArrowBitmap("#FF9F0A"))
                         s.addSource(GeoJsonSource("gps"))
-                        s.addLayer(SymbolLayer("gps-l", "gps").withProperties(iconImage("arrow_blue"), iconAllowOverlap(true), iconIgnorePlacement(true), iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP)))
-                        s.addSource(GeoJsonSource("dest"))
-                        s.addLayer(CircleLayer("dest-l", "dest").withProperties(circleRadius(9f), circleColor("#32D74B")))
-                        s.addSource(GeoJsonSource("route"))
-                        s.addLayer(LineLayer("route-l", "route").withProperties(lineColor("#64D2FF"), lineWidth(8f)))
-                        s.addSource(GeoJsonSource("safety"))
-                        s.addLayer(CircleLayer("safety-l", "safety").withProperties(circleRadius(7f), circleColor("#FF453A"), circleStrokeColor("#FFFFFF"), circleStrokeWidth(2f)))
+                        s.addLayer(SymbolLayer("gps-l", "gps").withProperties(
+                            iconImage("arrow_blue"), 
+                            iconAllowOverlap(true), 
+                            iconIgnorePlacement(true), 
+                            iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP)
+                        ))
+
                         ready = true
                     }
                 }
@@ -806,15 +821,11 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                 m.setPadding(paddingLeft, paddingTop, 0, paddingBottom)
 
                 val snap = if (navigating && route != null && location != null) snapToRoute(location.latitude, location.longitude, route.points) else null
-                val dLat = snap?.first ?: location?.latitude
-                val dLon = snap?.second ?: location?.longitude
+                val targetLat = snap?.first ?: location?.latitude
+                val targetLon = snap?.second ?: location?.longitude
 
-                if (dLat != null && dLon != null) {
-                    val targetLat = dLat
-                    val targetLon = dLon
-                    
-                    // BUSSOLA MATEMATICA: Calcola l'angolo di rotazione basandosi sul vero spostamento fisico
-                    val targetBearing = if (!animState.lat.isNaN() && distanceMeters(animState.lat, animState.lon, targetLat, targetLon) > 0.5) {
+                if (targetLat != null && targetLon != null) {
+                    val targetBearing = if (!animState.lat.isNaN() && distanceMeters(animState.lat, animState.lon, targetLat, targetLon) > 1.0) {
                         calculateBearing(animState.lat, animState.lon, targetLat, targetLon)
                     } else if (location != null && location.hasBearing() && speed > 5) {
                         location.bearing.toDouble()
@@ -837,21 +848,16 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                         val startLon = animState.lon
                         val startBearing = animState.bearing
 
-                        // La telecamera segue la strada dolcemente in 700ms
-                        if (navigating && followUser) {
-                            val targetZoom = when { speed > 90 -> 15.0; speed > 50 -> 16.5; else -> 17.5 }
-                            val targetTilt = if (speed > 80) 60.0 else 45.0
-                            val pos = CameraPosition.Builder().target(LatLng(targetLat, targetLon)).zoom(targetZoom).bearing(targetBearing).tilt(targetTilt).build()
-                            m.easeCamera(CameraUpdateFactory.newCameraPosition(pos), 700, false)
-                        }
-
-                        // L'animatore grafico ruota la freccia seguendo la bussola matematica
                         animState.animator?.cancel()
-                        val anim = ValueAnimator.ofFloat(0f, 1f)
-                        anim.duration = 700 
+
+                        // EXTRAPOLATION FIX: Animazione finta da 750 millisecondi con estrapolazione fino a 1.5
+                        // Così la freccia copre i buchi di ritardo del GPS tirando dritto fluidamente senza frenare.
+                        val anim = ValueAnimator.ofFloat(0f, 1.5f)
+                        anim.duration = 750 
                         anim.interpolator = LinearInterpolator()
                         anim.addUpdateListener { a ->
-                            val f = a.animatedFraction
+                            val f = a.animatedValue as Float
+
                             val currentLat = startLat + (targetLat - startLat) * f
                             val currentLon = startLon + (targetLon - startLon) * f
 
@@ -867,6 +873,14 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                             m.style?.let { s ->
                                 s.getSourceAs<GeoJsonSource>("gps")?.setGeoJson(Feature.fromGeometry(Point.fromLngLat(currentLon, currentLat)))
                                 s.getLayerAs<SymbolLayer>("gps-l")?.setProperties(iconImage(if (isSimulating) "arrow_amber" else "arrow_blue"), iconRotate(currentBearing.toFloat()))
+                            }
+
+                            // La telecamera segue millimetricamente la freccia senza staccarsi mai
+                            if (navigating && followUser) {
+                                val targetZoom = when { speed > 90 -> 15.0; speed > 50 -> 16.5; else -> 17.5 }
+                                val targetTilt = if (speed > 80) 60.0 else 45.0
+                                val pos = CameraPosition.Builder().target(LatLng(currentLat, currentLon)).zoom(targetZoom).bearing(currentBearing).tilt(targetTilt).build()
+                                m.moveCamera(CameraUpdateFactory.newCameraPosition(pos))
                             }
                         }
                         anim.start()
@@ -957,8 +971,7 @@ private suspend fun fetchRoute(l: Location, p: Place, avoidTolls: Boolean, avoid
 }
 
 private fun calculateBearing(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-    val phi1 = Math.toRadians(lat1)
-    val phi2 = Math.toRadians(lat2)
+    val phi1 = Math.toRadians(lat1); val phi2 = Math.toRadians(lat2)
     val deltaLambda = Math.toRadians(lon2 - lon1)
     val y = sin(deltaLambda) * cos(phi2)
     val x = cos(phi1) * sin(phi2) - sin(phi1) * cos(phi2) * cos(deltaLambda)
