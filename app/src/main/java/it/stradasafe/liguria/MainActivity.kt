@@ -198,7 +198,6 @@ private fun rememberGps(client: FusedLocationProviderClient, granted: Boolean): 
             }
         }
         
-        // COMPROMESSO PERFETTO: 500 millisecondi
         val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 500)
             .setMinUpdateIntervalMillis(500)
             .setMinUpdateDistanceMeters(0f)
@@ -395,15 +394,12 @@ private fun App(client: FusedLocationProviderClient) {
         if (navigating && showStopButton) { delay(10000); showStopButton = false }
     }
 
-    // SCUDO ANTI-CRASH: Evita che Huawei chiuda l'app se blocca il Background Service
     LaunchedEffect(navigating) {
         try {
             val serviceIntent = Intent(context, NavigationService::class.java)
             if (navigating) ContextCompat.startForegroundService(context, serviceIntent)
             else { serviceIntent.action = "STOP"; context.startService(serviceIntent) }
-        } catch (e: Exception) {
-            // Ignora il crash silenziosamente se il sistema impedisce l'avvio
-        }
+        } catch (e: Exception) {}
     }
 
     LaunchedEffect(effectiveGps, navigating, route) {
@@ -837,13 +833,17 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                         val startLon = animState.lon
                         val startBearing = animState.bearing
 
+                        // MODIFICA FLUIDITÀ: Estrapolazione del movimento (Dead Reckoning visivo)
+                        // L'animatore non si ferma più a 1.0 (500ms), ma può arrivare a 3.0 (1.5 secondi)
+                        // Così, in caso di micro-ritardi del GPS, la freccia e la mappa continuano ad andare
+                        // avanti alla stessa velocità in modo perfettamente fluido.
                         animState.animator?.cancel()
-
-                        val anim = ValueAnimator.ofFloat(0f, 1f)
-                        anim.duration = 500 
+                        val anim = ValueAnimator.ofFloat(0f, 3f) 
+                        anim.duration = 1500 
                         anim.interpolator = LinearInterpolator()
                         anim.addUpdateListener { a ->
-                            val f = a.animatedFraction
+                            val f = a.animatedValue as Float // NON animatedFraction, ma il valore puro
+
                             val currentLat = startLat + (targetLat - startLat) * f
                             val currentLon = startLon + (targetLon - startLon) * f
 
@@ -865,8 +865,6 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                                 val targetZoom = when { speed > 90 -> 15.0; speed > 50 -> 16.5; else -> 17.5 }
                                 val targetTilt = if (speed > 80) 60.0 else 45.0
                                 val pos = CameraPosition.Builder().target(LatLng(currentLat, currentLon)).zoom(targetZoom).bearing(currentBearing).tilt(targetTilt).build()
-                                
-                                // FIX ANTI-CRASH: Usiamo moveCamera al posto di easeCamera per evitare il blocco del motore grafico
                                 m.moveCamera(CameraUpdateFactory.newCameraPosition(pos))
                             }
                         }
