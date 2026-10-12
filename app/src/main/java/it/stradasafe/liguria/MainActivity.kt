@@ -787,20 +787,16 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                     map.cameraPosition = CameraPosition.Builder().target(LatLng(44.4, 8.9)).zoom(8.3).build()
                     map.setStyle(Style.Builder().fromUri(STYLE_URL)) { s ->
                         
-                        // Z-INDEX FIX: I layer in MapLibre vengono dipinti dal basso verso l'alto
-                        // 1. Dipingiamo il Percorso
                         s.addSource(GeoJsonSource("route"))
                         s.addLayer(LineLayer("route-l", "route").withProperties(lineColor("#64D2FF"), lineWidth(8f)))
                         
-                        // 2. Dipingiamo la Destinazione
                         s.addSource(GeoJsonSource("dest"))
                         s.addLayer(CircleLayer("dest-l", "dest").withProperties(circleRadius(9f), circleColor("#32D74B")))
                         
-                        // 3. Dipingiamo la Sicurezza (Tutor/Velox)
                         s.addSource(GeoJsonSource("safety"))
                         s.addLayer(CircleLayer("safety-l", "safety").withProperties(circleRadius(7f), circleColor("#FF453A"), circleStrokeColor("#FFFFFF"), circleStrokeWidth(2f)))
 
-                        // 4. Dipingiamo la FRECCIA per ultima! Così sarà SEMPRE sopra al percorso.
+                        // FRECCIA IN CIMA (Z-INDEX corretto)
                         s.addImage("arrow_blue", createArrowBitmap("#0A84FF"))
                         s.addImage("arrow_amber", createArrowBitmap("#FF9F0A"))
                         s.addSource(GeoJsonSource("gps"))
@@ -848,10 +844,24 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                         val startLon = animState.lon
                         val startBearing = animState.bearing
 
+                        // LA TELECAMERA ELASTICA E MORBIDA È TORNATA
+                        if (navigating && followUser) {
+                            val targetZoom = when { speed > 90 -> 15.0; speed > 50 -> 16.5; else -> 17.5 }
+                            val targetTilt = if (speed > 80) 60.0 else 45.0
+                            val pos = CameraPosition.Builder()
+                                .target(LatLng(targetLat, targetLon))
+                                .zoom(targetZoom)
+                                .bearing(targetBearing)
+                                .tilt(targetTilt)
+                                .build()
+                            
+                            // 1000 millisecondi con l'effetto nativo "accelerazione-decelerazione", comodissimo per l'occhio
+                            m.animateCamera(CameraUpdateFactory.newCameraPosition(pos), 1000)
+                        }
+
                         animState.animator?.cancel()
 
-                        // EXTRAPOLATION FIX: Animazione finta da 750 millisecondi con estrapolazione fino a 1.5
-                        // Così la freccia copre i buchi di ritardo del GPS tirando dritto fluidamente senza frenare.
+                        // L'icona della freccia invece "scivola" matematicamente a 60 fps e prosegue se il GPS ritarda
                         val anim = ValueAnimator.ofFloat(0f, 1.5f)
                         anim.duration = 750 
                         anim.interpolator = LinearInterpolator()
@@ -873,14 +883,6 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                             m.style?.let { s ->
                                 s.getSourceAs<GeoJsonSource>("gps")?.setGeoJson(Feature.fromGeometry(Point.fromLngLat(currentLon, currentLat)))
                                 s.getLayerAs<SymbolLayer>("gps-l")?.setProperties(iconImage(if (isSimulating) "arrow_amber" else "arrow_blue"), iconRotate(currentBearing.toFloat()))
-                            }
-
-                            // La telecamera segue millimetricamente la freccia senza staccarsi mai
-                            if (navigating && followUser) {
-                                val targetZoom = when { speed > 90 -> 15.0; speed > 50 -> 16.5; else -> 17.5 }
-                                val targetTilt = if (speed > 80) 60.0 else 45.0
-                                val pos = CameraPosition.Builder().target(LatLng(currentLat, currentLon)).zoom(targetZoom).bearing(currentBearing).tilt(targetTilt).build()
-                                m.moveCamera(CameraUpdateFactory.newCameraPosition(pos))
                             }
                         }
                         anim.start()
