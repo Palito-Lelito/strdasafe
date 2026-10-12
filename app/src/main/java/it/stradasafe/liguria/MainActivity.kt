@@ -2,6 +2,7 @@ package it.stradasafe.liguria
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.animation.ValueAnimator
 import android.app.Activity
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -17,6 +18,7 @@ import android.os.Bundle
 import android.os.IBinder
 import android.speech.tts.TextToSpeech
 import android.view.WindowManager
+import android.view.animation.LinearInterpolator
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -144,6 +146,18 @@ object AppState {
     val tutorStartDistanceRemaining = mutableDoubleStateOf(0.0)
 }
 
+// Struttura per gestire l'animazione fluida a 60fps senza pesare sul processore
+class AnimationState {
+    var animator: ValueAnimator? = null
+    var lat: Double = Double.NaN
+    var lon: Double = Double.NaN
+    var bearing: Double = 0.0
+    
+    var lastTargetLat: Double = Double.NaN
+    var lastTargetLon: Double = Double.NaN
+    var lastTargetBearing: Double = 0.0
+}
+
 class MainActivity : ComponentActivity() {
     private lateinit var client: FusedLocationProviderClient
 
@@ -176,10 +190,7 @@ private fun rememberGps(client: FusedLocationProviderClient, granted: Boolean): 
                         if (currentLoc != null) {
                             val timeDelta = (newLoc.time - currentLoc.time) / 1000f
                             val dist = currentLoc.distanceTo(newLoc)
-                            
-                            if (timeDelta > 0 && (dist / timeDelta) > 55f) {
-                                return@let 
-                            }
+                            if (timeDelta > 0 && (dist / timeDelta) > 55f) return@let 
                         }
                         location = newLoc 
                     }
@@ -187,9 +198,9 @@ private fun rememberGps(client: FusedLocationProviderClient, granted: Boolean): 
             }
         }
         
-        // MODIFICA TEMPO REALE ESTREMO: 100 millisecondi
-        val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 100)
-            .setMinUpdateIntervalMillis(100)
+        // COMPROMESSO PERFETTO: Il GPS richiede i dati ogni 500 millisecondi
+        val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 500)
+            .setMinUpdateIntervalMillis(500)
             .setMinUpdateDistanceMeters(0f)
             .build()
             
@@ -210,14 +221,12 @@ private fun rememberSpeaker(): Pair<TextToSpeech?, Boolean> {
         engine = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 engine?.language = Locale.ITALIAN
-                
                 engine?.setAudioAttributes(
                     AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build()
                 )
-                
                 ready = true
             }
         }
@@ -227,7 +236,6 @@ private fun rememberSpeaker(): Pair<TextToSpeech?, Boolean> {
     return tts to ready
 }
 
-// Simulatore Dead Reckoning
 private fun simulateMovement(lastLoc: Location, timeDeltaMs: Long): Location {
     val distanceMeters = (lastLoc.speed) * (timeDeltaMs / 1000f)
     val r = 6371000.0
@@ -245,13 +253,11 @@ private fun simulateMovement(lastLoc: Location, timeDeltaMs: Long): Location {
     }
 }
 
-// CALAMITA MATEMATICA: Route Snapping
 private fun snapToRoute(lat: Double, lon: Double, routePts: List<Point>): Pair<Double, Double> {
     if (routePts.isEmpty()) return lat to lon
     var minDistance = Double.MAX_VALUE
     var snappedLat = lat
     var snappedLon = lon
-    
     val cosLat = cos(Math.toRadians(lat))
 
     for (i in 0 until routePts.size - 1) {
@@ -264,21 +270,11 @@ private fun snapToRoute(lat: Double, lon: Double, routePts: List<Point>): Pair<D
 
         val dx = x2 - x1
         val dy = y2 - y1
-        
         if (dx == 0.0 && dy == 0.0) continue
 
         val t = ((x0 - x1) * dx + (y0 - y1) * dy) / (dx * dx + dy * dy)
-        
-        val closestX = when {
-            t < 0 -> x1
-            t > 1 -> x2
-            else -> x1 + t * dx
-        }
-        val closestY = when {
-            t < 0 -> y1
-            t > 1 -> y2
-            else -> y1 + t * dy
-        }
+        val closestX = when { t < 0 -> x1; t > 1 -> x2; else -> x1 + t * dx }
+        val closestY = when { t < 0 -> y1; t > 1 -> y2; else -> y1 + t * dy }
 
         val projLon = closestX / cosLat
         val projLat = closestY
@@ -290,16 +286,13 @@ private fun snapToRoute(lat: Double, lon: Double, routePts: List<Point>): Pair<D
             snappedLon = projLon
         }
     }
-    
     return if (minDistance < 50.0) snappedLat to snappedLon else lat to lon
 }
 
-// DISEGNATORE DELLA FRECCIA DI NAVIGAZIONE
 private fun createArrowBitmap(colorHex: String): android.graphics.Bitmap {
     val size = 96
     val bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
     val canvas = android.graphics.Canvas(bitmap)
-    
     val path = android.graphics.Path().apply {
         moveTo(size / 2f, 8f)           
         lineTo(size - 12f, size - 12f)  
@@ -307,20 +300,17 @@ private fun createArrowBitmap(colorHex: String): android.graphics.Bitmap {
         lineTo(12f, size - 12f)         
         close()
     }
-    
     canvas.drawPath(path, android.graphics.Paint().apply {
         color = android.graphics.Color.parseColor(colorHex)
         style = android.graphics.Paint.Style.FILL
         isAntiAlias = true
     })
-    
     canvas.drawPath(path, android.graphics.Paint().apply {
         color = android.graphics.Color.WHITE
         style = android.graphics.Paint.Style.STROKE
         strokeWidth = 6f
         isAntiAlias = true
     })
-    
     return bitmap
 }
 
@@ -354,10 +344,7 @@ private fun App(client: FusedLocationProviderClient) {
     var avoidTolls by AppState.avoidTolls
     var avoidHighways by AppState.avoidHighways
 
-    var granted by remember {
-        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED)
-    }
-
+    var granted by remember { mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) }
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
     val rawGps = rememberGps(client, granted)
     
@@ -365,19 +352,13 @@ private fun App(client: FusedLocationProviderClient) {
     var isSimulating by remember { mutableStateOf(false) }
     
     DisposableEffect(navigating) {
-        if (navigating) {
-            activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        } else {
-            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        }
+        if (navigating) activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         onDispose { activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
     }
     
     LaunchedEffect(rawGps, navigating) {
-        if (rawGps != null) {
-            effectiveGps = rawGps
-            isSimulating = false
-        }
+        if (rawGps != null) { effectiveGps = rawGps; isSimulating = false }
     }
     
     LaunchedEffect(navigating) {
@@ -416,12 +397,8 @@ private fun App(client: FusedLocationProviderClient) {
 
     LaunchedEffect(navigating) {
         val serviceIntent = Intent(context, NavigationService::class.java)
-        if (navigating) {
-            ContextCompat.startForegroundService(context, serviceIntent)
-        } else {
-            serviceIntent.action = "STOP"
-            context.startService(serviceIntent)
-        }
+        if (navigating) ContextCompat.startForegroundService(context, serviceIntent)
+        else { serviceIntent.action = "STOP"; context.startService(serviceIntent) }
     }
 
     LaunchedEffect(effectiveGps, navigating, route) {
@@ -484,9 +461,7 @@ private fun App(client: FusedLocationProviderClient) {
                 try {
                     val newRoute = fetchRoute(effectiveGps!!, place!!, avoidTolls, avoidHighways)
                     route = newRoute
-                    AppState.activeSafetyDevices.value = AppState.safetyDevices.value.filter {
-                        distanceToPolyline(it.lat, it.lon, newRoute.points) < 100.0
-                    }
+                    AppState.activeSafetyDevices.value = AppState.safetyDevices.value.filter { distanceToPolyline(it.lat, it.lon, newRoute.points) < 100.0 }
                     stepIndex = 0; lastSpoken = -1
                     if (!muted && ttsReady) tts?.speak("Ricalcolo in corso", TextToSpeech.QUEUE_FLUSH, null, "reroute")
                 } catch (_: Exception) {}
@@ -547,9 +522,7 @@ private fun App(client: FusedLocationProviderClient) {
                                     } },
                                     onClose = { isSearchExpanded = false }
                                 )
-                            } else {
-                                HomeBottomBar(onClick = { isSearchExpanded = true })
-                            }
+                            } else { HomeBottomBar(onClick = { isSearchExpanded = true }) }
                         }
                     }
                 } else {
@@ -582,9 +555,7 @@ private fun App(client: FusedLocationProviderClient) {
                                     } },
                                     onClose = { isSearchExpanded = false }
                                 )
-                            } else {
-                                HomeBottomBar(onClick = { isSearchExpanded = true })
-                            }
+                            } else { HomeBottomBar(onClick = { isSearchExpanded = true }) }
                         }
                     }
                 }
@@ -594,24 +565,15 @@ private fun App(client: FusedLocationProviderClient) {
 }
 
 private fun resetNavigation() {
-    AppState.navigating.value = false
-    AppState.stepIndex.intValue = 0
-    AppState.alertedDevices.clear()
-    AppState.activeSafetyDevices.value = emptyList()
-    AppState.speedLimit.value = null
-    AppState.inTutorZone.value = false
-    AppState.followUser.value = true
-    AppState.route.value = null 
-    AppState.place.value = null 
+    AppState.navigating.value = false; AppState.stepIndex.intValue = 0; AppState.alertedDevices.clear()
+    AppState.activeSafetyDevices.value = emptyList(); AppState.speedLimit.value = null; AppState.inTutorZone.value = false
+    AppState.followUser.value = true; AppState.route.value = null; AppState.place.value = null 
 }
 
 private fun saveHistory(context: Context, history: List<Place>) {
     val prefs = context.getSharedPreferences("StradaSafePrefs", Context.MODE_PRIVATE)
     val jsonArray = JSONArray()
-    history.forEach { 
-        val obj = JSONObject().apply { put("name", it.name); put("lat", it.lat); put("lon", it.lon) }
-        jsonArray.put(obj)
-    }
+    history.forEach { jsonArray.put(JSONObject().apply { put("name", it.name); put("lat", it.lat); put("lon", it.lon) }) }
     prefs.edit().putString("search_history", jsonArray.toString()).apply()
 }
 
@@ -634,22 +596,14 @@ private suspend fun fetchSpeedLimit(lat: Double, lon: Double): Int? = withContex
         val query = "[out:json][timeout:3];way(around:20,$lat,$lon)[\"maxspeed\"];out tags;"
         val e = URLEncoder.encode(query, "UTF-8")
         val c = (URL("https://overpass-api.de/api/interpreter?data=$e").openConnection() as HttpURLConnection).apply {
-            connectTimeout = 3000; readTimeout = 3000; requestMethod = "GET"
-            setRequestProperty("User-Agent", "StradaSafeLiguria/1.1")
+            connectTimeout = 3000; readTimeout = 3000; requestMethod = "GET"; setRequestProperty("User-Agent", "StradaSafeLiguria/1.1")
         }
         val res = c.inputStream.bufferedReader().use { it.readText() }
         val els = JSONObject(res).optJSONArray("elements") ?: return@withContext null
-        
         for (i in 0 until els.length()) {
             val ms = els.getJSONObject(i).optJSONObject("tags")?.optString("maxspeed")
             if (!ms.isNullOrEmpty()) {
-                return@withContext when (ms) {
-                    "IT:urban" -> 50
-                    "IT:rural" -> 90
-                    "IT:motorway" -> 130
-                    "IT:extra_urban" -> 110
-                    else -> ms.filter { it.isDigit() }.toIntOrNull()
-                }
+                return@withContext when (ms) { "IT:urban" -> 50; "IT:rural" -> 90; "IT:motorway" -> 130; "IT:extra_urban" -> 110; else -> ms.filter { it.isDigit() }.toIntOrNull() }
             }
         }
     } catch (_: Exception) {}
@@ -684,11 +638,7 @@ private fun TopStatusBar(gps: Location?) {
         Row(Modifier.fillMaxWidth().padding(10.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column {
                 Text("STRADASAFE 1.1", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                Text(
-                    if (gps != null) "GPS Attivo (${gps.accuracy.roundToInt()}m)" else "Ricerca segnale GPS...",
-                    color = if (gps != null) WazeGreen else AlertAmber,
-                    fontSize = 10.sp, fontWeight = FontWeight.Medium
-                )
+                Text(if (gps != null) "GPS Attivo (${gps.accuracy.roundToInt()}m)" else "Ricerca segnale GPS...", color = if (gps != null) WazeGreen else AlertAmber, fontSize = 10.sp, fontWeight = FontWeight.Medium)
             }
         }
     }
@@ -698,9 +648,7 @@ private fun TopStatusBar(gps: Location?) {
 private fun HomeBottomBar(onClick: () -> Unit) {
     Surface(color = CardSurface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(8.dp, RectangleShape).clickable { onClick() }) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("🔍", fontSize = 18.sp)
-            Spacer(Modifier.width(12.dp))
-            Text("Cerca destinazione in Liguria...", color = TextGray, fontSize = 14.sp)
+            Text("🔍", fontSize = 18.sp); Spacer(Modifier.width(12.dp)); Text("Cerca destinazione in Liguria...", color = TextGray, fontSize = 14.sp)
         }
     }
 }
@@ -709,43 +657,30 @@ private fun HomeBottomBar(onClick: () -> Unit) {
 private fun SearchExpandedCard(
     query: String, onQuery: (String) -> Unit, granted: Boolean, onGps: () -> Unit,
     busy: Boolean, error: String?, results: List<Place>, history: List<Place>,
-    avoidTolls: Boolean, onTollsChange: (Boolean) -> Unit,
-    avoidHighways: Boolean, onHighwaysChange: (Boolean) -> Unit,
+    avoidTolls: Boolean, onTollsChange: (Boolean) -> Unit, avoidHighways: Boolean, onHighwaysChange: (Boolean) -> Unit,
     onSearch: () -> Unit, onPlaceSelected: (Place) -> Unit, onClose: () -> Unit
 ) {
     Surface(color = CardSurface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(16.dp, RectangleShape)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Cerca Luogo", color = TextWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                TextButton(onClick = onClose) { Text("CHIUDI", color = AppleBlue, fontSize = 13.sp) }
+                Text("Cerca Luogo", color = TextWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold); TextButton(onClick = onClose) { Text("CHIUDI", color = AppleBlue, fontSize = 13.sp) }
             }
-            
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { onTollsChange(!avoidTolls) }) {
-                    Checkbox(checked = avoidTolls, onCheckedChange = onTollsChange, colors = CheckboxDefaults.colors(checkedColor = AppleBlue, uncheckedColor = TextGray))
-                    Text("No Pedaggi", color = TextWhite, fontSize = 12.sp)
+                    Checkbox(checked = avoidTolls, onCheckedChange = onTollsChange, colors = CheckboxDefaults.colors(checkedColor = AppleBlue, uncheckedColor = TextGray)); Text("No Pedaggi", color = TextWhite, fontSize = 12.sp)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { onHighwaysChange(!avoidHighways) }) {
-                    Checkbox(checked = avoidHighways, onCheckedChange = onHighwaysChange, colors = CheckboxDefaults.colors(checkedColor = AppleBlue, uncheckedColor = TextGray))
-                    Text("No Autostrade", color = TextWhite, fontSize = 12.sp)
+                    Checkbox(checked = avoidHighways, onCheckedChange = onHighwaysChange, colors = CheckboxDefaults.colors(checkedColor = AppleBlue, uncheckedColor = TextGray)); Text("No Autostrade", color = TextWhite, fontSize = 12.sp)
                 }
             }
-
-            OutlinedTextField(
-                value = query, onValueChange = onQuery, modifier = Modifier.fillMaxWidth(), singleLine = true,
-                placeholder = { Text("Indirizzo o luogo...", color = TextGray, fontSize = 13.sp) }, shape = RectangleShape,
-                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = AppleBlue, unfocusedBorderColor = TextGray, focusedTextColor = TextWhite, unfocusedTextColor = TextWhite)
-            )
+            OutlinedTextField(value = query, onValueChange = onQuery, modifier = Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("Indirizzo o luogo...", color = TextGray, fontSize = 13.sp) }, shape = RectangleShape, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = AppleBlue, unfocusedBorderColor = TextGray, focusedTextColor = TextWhite, unfocusedTextColor = TextWhite))
             if (!granted) Button(onClick = onGps, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue)) { Text("ATTIVA PERMESSO GPS", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
             Button(onClick = onSearch, enabled = query.length > 2 && granted && !busy, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue)) { Text(if (busy) "CERCANDO..." else "CERCA", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
             error?.let { Text(it, color = AlertRed, fontSize = 12.sp) }
-            
             if (results.isNotEmpty()) {
                 LazyColumn(Modifier.fillMaxWidth().heightIn(max = 200.dp)) {
                     items(results) { res ->
-                        TextButton(onClick = { onPlaceSelected(res) }, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, contentPadding = PaddingValues(10.dp)) {
-                            Text(res.name, color = TextWhite, maxLines = 2, fontSize = 13.sp, textAlign = TextAlign.Start, modifier = Modifier.fillMaxWidth())
-                        }
+                        TextButton(onClick = { onPlaceSelected(res) }, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, contentPadding = PaddingValues(10.dp)) { Text(res.name, color = TextWhite, maxLines = 2, fontSize = 13.sp, textAlign = TextAlign.Start, modifier = Modifier.fillMaxWidth()) }
                         HorizontalDivider(color = Color(0x33FFFFFF))
                     }
                 }
@@ -754,10 +689,7 @@ private fun SearchExpandedCard(
                 LazyColumn(Modifier.fillMaxWidth().heightIn(max = 200.dp)) {
                     items(history) { res ->
                         TextButton(onClick = { onPlaceSelected(res) }, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, contentPadding = PaddingValues(10.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                Text("🕒", fontSize = 14.sp, modifier = Modifier.padding(end = 10.dp))
-                                Text(res.name, color = TextWhite, maxLines = 2, fontSize = 13.sp, textAlign = TextAlign.Start, modifier = Modifier.fillMaxWidth())
-                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) { Text("🕒", fontSize = 14.sp, modifier = Modifier.padding(end = 10.dp)); Text(res.name, color = TextWhite, maxLines = 2, fontSize = 13.sp, textAlign = TextAlign.Start, modifier = Modifier.fillMaxWidth()) }
                         }
                         HorizontalDivider(color = Color(0x33FFFFFF))
                     }
@@ -794,56 +726,35 @@ private fun ManeuverCard(step: Step?, distanceToStep: Double, muted: Boolean, on
                 Text(if (distanceToStep.isNaN()) "..." else "${distanceToStep.roundToInt()} m", color = TextWhite, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
                 Text(step?.text ?: "Prosegui", color = WazeCyan, fontSize = 14.sp, maxLines = 2, fontWeight = FontWeight.Medium)
             }
-            IconButton(onClick = onMuteToggle, modifier = Modifier.size(40.dp)) {
-                Text(if (muted) "🔇" else "🔊", fontSize = 20.sp)
-            }
+            IconButton(onClick = onMuteToggle, modifier = Modifier.size(40.dp)) { Text(if (muted) "🔇" else "🔊", fontSize = 20.sp) }
         }
     }
 }
 
 @Composable
-private fun EtaCard(
-    speed: Int, speedLimit: Int?, inTutorZone: Boolean, avgTutorSpeed: Int, 
-    remainingDistance: Double, remainingDuration: Double, 
-    showStopButton: Boolean, onCardClick: () -> Unit, onStop: () -> Unit
-) {
+private fun EtaCard(speed: Int, speedLimit: Int?, inTutorZone: Boolean, avgTutorSpeed: Int, remainingDistance: Double, remainingDuration: Double, showStopButton: Boolean, onCardClick: () -> Unit, onStop: () -> Unit) {
     val etaMillis = System.currentTimeMillis() + (remainingDuration * 1000).toLong()
-    val etaFormat = java.text.SimpleDateFormat("HH:mm", Locale.getDefault())
-    val etaString = if (remainingDuration > 0) etaFormat.format(java.util.Date(etaMillis)) else "--:--"
+    val etaString = if (remainingDuration > 0) java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(java.util.Date(etaMillis)) else "--:--"
+    val speedColor = if (speedLimit != null && speed > speedLimit) AlertRed else TextWhite
 
-    val isSpeeding = speedLimit != null && speed > speedLimit
-    val speedColor = if (isSpeeding) AlertRed else TextWhite
-
-    Surface(
-        color = CardSurface, 
-        shape = RectangleShape, 
-        modifier = Modifier.fillMaxWidth().shadow(16.dp, RectangleShape).clickable { onCardClick() }
-    ) {
+    Surface(color = CardSurface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(16.dp, RectangleShape).clickable { onCardClick() }) {
         Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     MetricDashboard("$speed", "KM/H", speedColor)
                     if (speedLimit != null) {
-                        Surface(shape = RectangleShape, color = TextWhite, border = BorderStroke(2.dp, AlertRed), modifier = Modifier.size(32.dp)) {
-                            Box(contentAlignment = Alignment.Center) { Text("$speedLimit", color = DarkBackground, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
-                        }
+                        Surface(shape = RectangleShape, color = TextWhite, border = BorderStroke(2.dp, AlertRed), modifier = Modifier.size(32.dp)) { Box(contentAlignment = Alignment.Center) { Text("$speedLimit", color = DarkBackground, fontWeight = FontWeight.Bold, fontSize = 13.sp) } }
                     }
                     if (inTutorZone) {
-                        val isAvgSpeeding = speedLimit != null && avgTutorSpeed > speedLimit
-                        val avgColor = if (isAvgSpeeding) AlertRed else AlertAmber
+                        val avgColor = if (speedLimit != null && avgTutorSpeed > speedLimit) AlertRed else AlertAmber
                         Surface(shape = RectangleShape, color = Color(0x33FF9F0A), modifier = Modifier.padding(start = 6.dp)) { MetricDashboard("$avgTutorSpeed", "MEDIA", avgColor, modifier = Modifier.padding(horizontal = 6.dp)) }
                     }
                 }
-                
                 MetricDashboard("%.1f".format(remainingDistance / 1000), "KM", TextWhite)
                 MetricDashboard(etaString, "ARRIVO", WazeGreen)
             }
-            
             if (showStopButton) {
-                Button(onClick = onStop, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AlertRed)) { 
-                    Text("TERMINA VIAGGIO", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 13.sp) 
-                }
+                Button(onClick = onStop, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AlertRed)) { Text("TERMINA VIAGGIO", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
             }
         }
     }
@@ -851,17 +762,10 @@ private fun EtaCard(
 
 @Composable
 private fun MetricDashboard(value: String, unit: String, color: Color, modifier: Modifier = Modifier) = Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-    Text(value, color = color, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
-    Text(unit, color = TextGray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+    Text(value, color = color, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold); Text(unit, color = TextGray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
 }
 
-private fun getOrsManeuverSymbol(type: Int?): String = when (type) {
-    0, 2, 4, 12 -> "↰"
-    1, 3, 5, 13 -> "↱"
-    9 -> "⮌"
-    7, 8, 26, 27 -> "⟳"
-    else -> "↑"
-}
+private fun getOrsManeuverSymbol(type: Int?): String = when (type) { 0, 2, 4, 12 -> "↰"; 1, 3, 5, 13 -> "↱"; 9 -> "⮌"; 7, 8, 26, 27 -> "⟳"; else -> "↑" }
 
 @Composable
 private fun NavMap(location: Location?, place: Place?, route: RouteData?, navigating: Boolean, followUser: Boolean, speed: Int, isSimulating: Boolean) {
@@ -872,7 +776,7 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
     var ready by remember { mutableStateOf(false) }
     var fitted by remember { mutableStateOf(false) }
     
-    var lastValidBearing by remember { mutableDoubleStateOf(0.0) }
+    val animState = remember { AnimationState() }
 
     val paddingLeft = if (isLandscape && navigating) with(density) { 360.dp.toPx().toInt() } else 0
     val paddingTop = if (!isLandscape && navigating) with(density) { 100.dp.toPx().toInt() } else 0
@@ -885,28 +789,16 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                 getMapAsync { map ->
                     map.cameraPosition = CameraPosition.Builder().target(LatLng(44.4, 8.9)).zoom(8.3).build()
                     map.setStyle(Style.Builder().fromUri(STYLE_URL)) { s ->
-                        
                         s.addImage("arrow_blue", createArrowBitmap("#0A84FF"))
                         s.addImage("arrow_amber", createArrowBitmap("#FF9F0A"))
-
                         s.addSource(GeoJsonSource("gps"))
-                        
-                        s.addLayer(SymbolLayer("gps-l", "gps").withProperties(
-                            iconImage("arrow_blue"),
-                            iconAllowOverlap(true),
-                            iconIgnorePlacement(true),
-                            iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP)
-                        ))
-
+                        s.addLayer(SymbolLayer("gps-l", "gps").withProperties(iconImage("arrow_blue"), iconAllowOverlap(true), iconIgnorePlacement(true), iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP)))
                         s.addSource(GeoJsonSource("dest"))
                         s.addLayer(CircleLayer("dest-l", "dest").withProperties(circleRadius(9f), circleColor("#32D74B")))
-
                         s.addSource(GeoJsonSource("route"))
                         s.addLayer(LineLayer("route-l", "route").withProperties(lineColor("#64D2FF"), lineWidth(8f)))
-
                         s.addSource(GeoJsonSource("safety"))
                         s.addLayer(CircleLayer("safety-l", "safety").withProperties(circleRadius(7f), circleColor("#FF453A"), circleStrokeColor("#FFFFFF"), circleStrokeWidth(2f)))
-
                         ready = true
                     }
                 }
@@ -914,33 +806,71 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
         },
         update = { v ->
             if (ready) v.getMapAsync { m ->
-                
                 m.setPadding(paddingLeft, paddingTop, 0, paddingBottom)
 
-                if (location != null && location.hasBearing() && speed > 5) {
-                    lastValidBearing = location.bearing.toDouble()
-                }
-
-                val snap = if (navigating && route != null && location != null) {
-                    snapToRoute(location.latitude, location.longitude, route.points)
-                } else null
-                
+                val snap = if (navigating && route != null && location != null) snapToRoute(location.latitude, location.longitude, route.points) else null
                 val dLat = snap?.first ?: location?.latitude
                 val dLon = snap?.second ?: location?.longitude
 
+                // MOTORE DI ANIMAZIONE SINCRONIZZATO A 500 MILLISECONDI
                 if (dLat != null && dLon != null) {
-                    m.style?.getSourceAs<GeoJsonSource>("gps")?.setGeoJson(Feature.fromGeometry(Point.fromLngLat(dLon, dLat))) 
-                    m.style?.getLayerAs<SymbolLayer>("gps-l")?.setProperties(
-                        iconImage(if (isSimulating) "arrow_amber" else "arrow_blue"),
-                        iconRotate(lastValidBearing.toFloat())
-                    )
+                    val targetLat = dLat
+                    val targetLon = dLon
+                    val targetBearing = if (location != null && location.hasBearing() && speed > 5) location.bearing.toDouble() else animState.bearing
+
+                    if (animState.lat.isNaN()) {
+                        animState.lat = targetLat
+                        animState.lon = targetLon
+                        animState.bearing = targetBearing
+                    }
+
+                    if (targetLat != animState.lastTargetLat || targetLon != animState.lastTargetLon || targetBearing != animState.lastTargetBearing) {
+                        animState.lastTargetLat = targetLat
+                        animState.lastTargetLon = targetLon
+                        animState.lastTargetBearing = targetBearing
+
+                        val startLat = animState.lat
+                        val startLon = animState.lon
+                        val startBearing = animState.bearing
+
+                        animState.animator?.cancel()
+
+                        val anim = ValueAnimator.ofFloat(0f, 1f)
+                        anim.duration = 500 // SINCRONIZZATO a 500ms come il GPS
+                        anim.interpolator = LinearInterpolator()
+                        anim.addUpdateListener { a ->
+                            val f = a.animatedFraction
+                            val currentLat = startLat + (targetLat - startLat) * f
+                            val currentLon = startLon + (targetLon - startLon) * f
+
+                            var diff = targetBearing - startBearing
+                            while (diff < -180.0) diff += 360.0
+                            while (diff > 180.0) diff -= 360.0
+                            val currentBearing = startBearing + diff * f
+
+                            animState.lat = currentLat
+                            animState.lon = currentLon
+                            animState.bearing = currentBearing
+
+                            m.style?.let { s ->
+                                s.getSourceAs<GeoJsonSource>("gps")?.setGeoJson(Feature.fromGeometry(Point.fromLngLat(currentLon, currentLat)))
+                                s.getLayerAs<SymbolLayer>("gps-l")?.setProperties(iconImage(if (isSimulating) "arrow_amber" else "arrow_blue"), iconRotate(currentBearing.toFloat()))
+                            }
+
+                            if (navigating && followUser) {
+                                val targetZoom = when { speed > 90 -> 15.0; speed > 50 -> 16.5; else -> 17.5 }
+                                val targetTilt = if (speed > 80) 60.0 else 45.0
+                                val pos = CameraPosition.Builder().target(LatLng(currentLat, currentLon)).zoom(targetZoom).bearing(currentBearing).tilt(targetTilt).build()
+                                m.easeCamera(CameraUpdateFactory.newCameraPosition(pos), 0, false)
+                            }
+                        }
+                        anim.start()
+                        animState.animator = anim
+                    }
                 }
                 
-                if (place != null) {
-                    m.style?.getSourceAs<GeoJsonSource>("dest")?.setGeoJson(Feature.fromGeometry(Point.fromLngLat(place.lon, place.lat)))
-                } else {
-                    m.style?.getSourceAs<GeoJsonSource>("dest")?.setGeoJson(FeatureCollection.fromFeatures(emptyArray<Feature>()))
-                }
+                if (place != null) m.style?.getSourceAs<GeoJsonSource>("dest")?.setGeoJson(Feature.fromGeometry(Point.fromLngLat(place.lon, place.lat)))
+                else m.style?.getSourceAs<GeoJsonSource>("dest")?.setGeoJson(FeatureCollection.fromFeatures(emptyArray<Feature>()))
                 
                 if (route != null) {
                     m.style?.getSourceAs<GeoJsonSource>("route")?.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(route.points)))
@@ -955,31 +885,8 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                     fitted = false
                 }
 
-                val safetyPoints = if (navigating) {
-                    AppState.activeSafetyDevices.value.map { Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) }
-                } else {
-                    emptyList()
-                }
+                val safetyPoints = if (navigating) AppState.activeSafetyDevices.value.map { Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) } else emptyList()
                 m.style?.getSourceAs<GeoJsonSource>("safety")?.setGeoJson(FeatureCollection.fromFeatures(safetyPoints))
-
-                if (navigating && followUser && dLat != null && dLon != null) {
-                    val targetZoom = when {
-                        speed > 90 -> 15.0
-                        speed > 50 -> 16.5
-                        else -> 17.5
-                    }
-                    val targetTilt = if (speed > 80) 60.0 else 45.0
-
-                    val pos = CameraPosition.Builder()
-                        .target(LatLng(dLat, dLon))
-                        .zoom(targetZoom)
-                        .bearing(lastValidBearing)
-                        .tilt(targetTilt)
-                        .build()
-                        
-                    // MODIFICA TEMPO REALE ESTREMO: Animazione di 100 millisecondi
-                    m.animateCamera(CameraUpdateFactory.newCameraPosition(pos), 100)
-                }
             }
         },
         modifier = Modifier.fillMaxSize()
@@ -994,86 +901,42 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
 private suspend fun searchPlaces(q: String): List<Place> = withContext(Dispatchers.IO) {
     val e = URLEncoder.encode(q, "UTF-8")
     val c = (URL("$SEARCH_BASE/search?q=$e&format=jsonv2&limit=5&countrycodes=it&viewbox=7.45,44.75,10.10,43.70&bounded=1").openConnection() as HttpURLConnection).apply {
-        connectTimeout = 15000; readTimeout = 20000; requestMethod = "GET"
-        setRequestProperty("User-Agent", "StradaSafeLiguria/1.1")
-        setRequestProperty("Accept-Language", "it")
+        connectTimeout = 15000; readTimeout = 20000; requestMethod = "GET"; setRequestProperty("User-Agent", "StradaSafeLiguria/1.1"); setRequestProperty("Accept-Language", "it")
     }
-    
-    val res = try {
-        if (c.responseCode !in 200..299) error("Servizio ricerca non disponibile")
-        c.inputStream.bufferedReader().use { it.readText() }
-    } finally { c.disconnect() }
-    
+    val res = try { if (c.responseCode !in 200..299) error("Servizio ricerca non disponibile"); c.inputStream.bufferedReader().use { it.readText() } } finally { c.disconnect() }
     val a = JSONArray(res)
     if (a.length() == 0) error("Nessun risultato trovato in Liguria.")
-
     val list = mutableListOf<Place>()
-    for (i in 0 until a.length()) {
-        val o = a.getJSONObject(i)
-        list.add(Place(o.getString("display_name"), o.getString("lat").toDouble(), o.getString("lon").toDouble()))
-    }
+    for (i in 0 until a.length()) { val o = a.getJSONObject(i); list.add(Place(o.getString("display_name"), o.getString("lat").toDouble(), o.getString("lon").toDouble())) }
     list
 }
 
 private suspend fun fetchRoute(l: Location, p: Place, avoidTolls: Boolean, avoidHighways: Boolean): RouteData = withContext(Dispatchers.IO) {
     val urlStr = "https://api.openrouteservice.org/v2/directions/driving-car/geojson"
-    
     val jsonBody = JSONObject().apply {
-        put("coordinates", JSONArray().apply {
-            put(JSONArray().apply { put(l.longitude); put(l.latitude) })
-            put(JSONArray().apply { put(p.lon); put(p.lat) })
-        })
-        put("language", "it")
-        put("instructions", true)
-        
+        put("coordinates", JSONArray().apply { put(JSONArray().apply { put(l.longitude); put(l.latitude) }); put(JSONArray().apply { put(p.lon); put(p.lat) }) })
+        put("language", "it"); put("instructions", true)
         val avoids = JSONArray()
         if (avoidTolls) avoids.put("tollways")
         if (avoidHighways) avoids.put("highways")
-        
-        if (avoids.length() > 0) {
-            put("options", JSONObject().apply {
-                put("avoid_features", avoids)
-            })
-        }
+        if (avoids.length() > 0) put("options", JSONObject().apply { put("avoid_features", avoids) })
     }
-
     val c = (URL(urlStr).openConnection() as HttpURLConnection).apply {
-        connectTimeout = 15000
-        readTimeout = 20000
-        requestMethod = "POST"
-        setRequestProperty("Authorization", ORS_API_KEY)
-        setRequestProperty("Content-Type", "application/json; charset=utf-8")
-        setRequestProperty("Accept", "application/json, application/geo+json; charset=utf-8")
-        doOutput = true
+        connectTimeout = 15000; readTimeout = 20000; requestMethod = "POST"
+        setRequestProperty("Authorization", ORS_API_KEY); setRequestProperty("Content-Type", "application/json; charset=utf-8"); setRequestProperty("Accept", "application/json, application/geo+json; charset=utf-8"); doOutput = true
     }
-    
     try {
-        c.outputStream.use { os ->
-            val input = jsonBody.toString().toByteArray(Charsets.UTF_8)
-            os.write(input, 0, input.size)
-        }
-
-        if (c.responseCode !in 200..299) {
-            if (c.responseCode == 401 || c.responseCode == 403) error("API Key ORS non valida")
-            error("Nessun percorso alternativo trovato (${c.responseCode})")
-        }
-        
+        c.outputStream.use { os -> val input = jsonBody.toString().toByteArray(Charsets.UTF_8); os.write(input, 0, input.size) }
+        if (c.responseCode !in 200..299) { if (c.responseCode == 401 || c.responseCode == 403) error("API Key ORS non valida"); error("Nessun percorso alternativo trovato (${c.responseCode})") }
         val res = c.inputStream.bufferedReader().use { it.readText() }
         val root = JSONObject(res)
         if (root.has("error")) error("Errore nel calcolo del percorso")
-
         val feature = root.getJSONArray("features").getJSONObject(0)
-        
         val coords = feature.getJSONObject("geometry").getJSONArray("coordinates")
-        val pts = (0 until coords.length()).map { 
-            val a = coords.getJSONArray(it)
-            Point.fromLngLat(a.getDouble(0), a.getDouble(1)) 
-        }
-        
+        val pts = (0 until coords.length()).map { val a = coords.getJSONArray(it); Point.fromLngLat(a.getDouble(0), a.getDouble(1)) }
         val steps = mutableListOf<Step>()
         val props = feature.getJSONObject("properties")
         val summary = props.getJSONObject("summary")
-        
         val segments = props.getJSONArray("segments")
         for (i in 0 until segments.length()) {
             val segSteps = segments.getJSONObject(i).getJSONArray("steps")
@@ -1081,27 +944,17 @@ private suspend fun fetchRoute(l: Location, p: Place, avoidTolls: Boolean, avoid
                 val s = segSteps.getJSONObject(j)
                 val wpIndex = s.getJSONArray("way_points").getInt(0)
                 val pt = pts[wpIndex]
-                
-                steps += Step(
-                    text = s.getString("instruction"),
-                    lat = pt.latitude(), lon = pt.longitude(),
-                    distance = s.getDouble("distance"), duration = s.getDouble("duration"),
-                    maneuver = s.getInt("type").toString()
-                )
+                steps += Step(text = s.getString("instruction"), lat = pt.latitude(), lon = pt.longitude(), distance = s.getDouble("distance"), duration = s.getDouble("duration"), maneuver = s.getInt("type").toString())
             }
         }
         RouteData(pts, summary.getDouble("distance"), summary.getDouble("duration"), steps)
-    } finally {
-        c.disconnect()
-    }
+    } finally { c.disconnect() }
 }
 
 private fun distanceMeters(a: Double, b: Double, c: Double, d: Double): Double {
-    val r = 6371000.0; val p1 = Math.toRadians(a); val p2 = Math.toRadians(c)
-    val dp = Math.toRadians(c - a); val dl = Math.toRadians(d - b)
+    val r = 6371000.0; val p1 = Math.toRadians(a); val p2 = Math.toRadians(c); val dp = Math.toRadians(c - a); val dl = Math.toRadians(d - b)
     val x = sin(dp / 2).pow(2) + cos(p1) * cos(p2) * sin(dl / 2).pow(2)
     return 2 * r * atan2(sqrt(x), sqrt(1 - x))
 }
 
-private fun distanceToPolyline(lat: Double, lon: Double, pts: List<Point>): Double =
-    pts.minOfOrNull { distanceMeters(lat, lon, it.latitude(), it.longitude()) } ?: Double.MAX_VALUE
+private fun distanceToPolyline(lat: Double, lon: Double, pts: List<Point>): Double = pts.minOfOrNull { distanceMeters(lat, lon, it.latitude(), it.longitude()) } ?: Double.MAX_VALUE
