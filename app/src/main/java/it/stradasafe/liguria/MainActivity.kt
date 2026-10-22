@@ -485,7 +485,7 @@ private fun App(client: FusedLocationProviderClient) {
                     }
                 }
             }) {
-                NavMap(effectiveGps, place, route, navigating, followUser, speed, isSimulating, mapStyleUrl)
+                NavMap(effectiveGps, place, route, navigating, followUser, speed, mapStyleUrl)
             }
             
             if (navigating && isSimulating) {
@@ -694,6 +694,7 @@ private fun SearchExpandedCard(
                         Checkbox(checked = avoidHighways, onCheckedChange = onHighwaysChange, colors = CheckboxDefaults.colors(checkedColor = AppleBlue, uncheckedColor = TextGray)); Text("No Autostrade", color = MaterialTheme.colorScheme.onBackground, fontSize = 12.sp)
                     }
                 }
+                
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { 
                     onThemeToggle(
                         when (themeMode) {
@@ -801,7 +802,7 @@ private fun MetricDashboard(value: String, unit: String, color: Color, modifier:
 private fun getOrsManeuverSymbol(type: Int?): String = when (type) { 0, 2, 4, 12 -> "↰"; 1, 3, 5, 13 -> "↱"; 9 -> "⮌"; 7, 8, 26, 27 -> "⟳"; else -> "↑" }
 
 @Composable
-private fun NavMap(location: Location?, place: Place?, route: RouteData?, navigating: Boolean, followUser: Boolean, speed: Int, isSimulating: Boolean, mapStyleUrl: String) {
+private fun NavMap(location: Location?, place: Place?, route: RouteData?, navigating: Boolean, followUser: Boolean, speed: Int, mapStyleUrl: String) {
     val context = LocalContext.current
     val density = LocalDensity.current
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -810,7 +811,6 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
     var fitted by remember { mutableStateOf(false) }
     var loadedStyle by remember { mutableStateOf("") }
     
-    // Variabili per il calcolo della rotazione e posizione sganciate dall'animatore manuale
     var lastLat by remember { mutableDoubleStateOf(Double.NaN) }
     var lastLon by remember { mutableDoubleStateOf(Double.NaN) }
     var lastBearing by remember { mutableDoubleStateOf(0.0) }
@@ -850,11 +850,11 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                 try {
                     if (!m.locationComponent.isLocationComponentActivated && ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
                         m.style?.let { style ->
-                            val options = LocationComponentActivationOptions.builder(context, style).useDefaultLocationEngine(false).build()
+                            val options = LocationComponentActivationOptions.builder(context, style)
+                                .useDefaultLocationEngine(false)
+                                .build()
                             m.locationComponent.activateLocationComponent(options)
                             m.locationComponent.isLocationComponentEnabled = true
-                            
-                            // IL SEGRETO: Lasciamo che la telecamera la gestiamo noi in modo "elastico"
                             m.locationComponent.cameraMode = CameraMode.NONE 
                             m.locationComponent.renderMode = RenderMode.GPS
                         }
@@ -878,7 +878,6 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                     lastLon = targetLon
                     lastBearing = targetBearing
 
-                    // Passiamo il dato nudo e crudo al motore C++: zero lag, zero allocazione di memoria!
                     if (m.locationComponent.isLocationComponentActivated) {
                         val simLoc = Location("nav").apply {
                             latitude = targetLat
@@ -890,7 +889,6 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                         m.locationComponent.forceLocationUpdate(simLoc)
                     }
 
-                    // E teniamo la nostra telecamera morbidissima
                     if (navigating && followUser) {
                         val targetZoom = when { speed > 90 -> 15.0; speed > 50 -> 16.5; else -> 17.5 }
                         val targetTilt = if (speed > 80) 60.0 else 45.0
