@@ -78,8 +78,9 @@ import java.net.URLEncoder
 import java.util.Locale
 import kotlin.math.*
 
-// CHIAVE OPENROUTESERVICE DELL'UTENTE
+// CHIAVE OPENROUTESERVICE E MOTORE DI RICERCA
 private const val ORS_API_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImZjZDcxY2MyNmJiNjQwYzU4OTIzZDY0ZGE2MDEyMWJiIiwiaCI6Im11cm11cjY0In0="
+private const val SEARCH_BASE = "https://nominatim.openstreetmap.org"
 
 class NavigationService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
@@ -846,7 +847,6 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
             if (ready) v.getMapAsync { m ->
                 m.setPadding(paddingLeft, paddingTop, 0, paddingBottom)
 
-                // ATTIVAZIONE LOCATION COMPONENT C++
                 try {
                     if (!m.locationComponent.isLocationComponentActivated && ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
                         m.style?.let { style ->
