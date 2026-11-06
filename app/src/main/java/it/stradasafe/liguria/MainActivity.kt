@@ -28,10 +28,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.mutableDoubleStateOf
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -220,17 +216,29 @@ private fun App() {
     val permLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { perms ->
-        AppState.granted.value = perms[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        AppState.granted.value = perms[Manifest.permission.ACCESS_FINE_LOCATION] == true || 
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
     }
+    
     LaunchedEffect(Unit) {
-        AppState.granted.value = ContextCompat.checkSelfPermission(
-            context, Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
+        // SOLUZIONE 1: Richiesta dinamica dei permessi (GPS + Notifiche)
+        val permsToRequest = mutableListOf<String>()
+        
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            permsToRequest.add(Manifest.permission.ACCESS_FINE_LOCATION)
+            permsToRequest.add(Manifest.permission.ACCESS_COARSE_LOCATION)
+        } else {
+            AppState.granted.value = true
+        }
+        
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
-            permLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+            permsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        
+        if (permsToRequest.isNotEmpty()) {
+            permLauncher.launch(permsToRequest.toTypedArray())
         }
     }
 
@@ -731,16 +739,12 @@ private fun EtaCard(speed: Int, speedLimit: Int?, inTutor: Boolean, tutorAvg: Do
     }
 }
 
-// ============================================================
-// NAVMAP con lifecycle corretto + LocationComponent condizionale
-// ============================================================
 @Composable
 private fun NavMap(
     gps: Location?, place: Place?, route: RouteData?,
     navigating: Boolean, followUser: Boolean, isDark: Boolean,
     granted: Boolean
 ) {
-    // ✅ FIX: leggiamo il context qui, NON dentro il LaunchedEffect
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var mapRef by remember { mutableStateOf<MapLibreMap?>(null) }
@@ -754,10 +758,9 @@ private fun NavMap(
     LaunchedEffect(gps) { gps?.let { SmoothNav.onNewFix(it) } }
     LaunchedEffect(navigating) { if (!navigating) { SmoothNav.reset(); routeFitted = false } }
 
-    // Lifecycle del MapView
+    // SOLUZIONE 2: Gestione corretta del memory leak per la distruzione del componente nativo
     DisposableEffect(lifecycleOwner, mapViewRef) {
         val mv = mapViewRef ?: return@DisposableEffect onDispose { }
-        // Riallinea lo stato del MapView allo stato attuale del lifecycle
         val state = lifecycleOwner.lifecycle.currentState
         if (state.isAtLeast(Lifecycle.State.CREATED)) mv.onCreate(Bundle())
         if (state.isAtLeast(Lifecycle.State.STARTED)) mv.onStart()
@@ -774,8 +777,12 @@ private fun NavMap(
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
+        
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
+            mv.onDestroy() // FONDAMENTALE per liberare la memoria nativa
+            mapViewRef = null
+            mapRef = null
         }
     }
 
@@ -829,14 +836,12 @@ private fun NavMap(
         }
     }
 
-    // Attivazione LocationComponent quando il permesso è concesso
     LaunchedEffect(granted, mapRef) {
         if (!granted) return@LaunchedEffect
         val map = mapRef ?: return@LaunchedEffect
         val style = map.style ?: return@LaunchedEffect
         if (map.locationComponent.isLocationComponentActivated) return@LaunchedEffect
         try {
-            // ✅ Usa `context` (letto fuori dal LaunchedEffect), non LocalContext.current
             val locationOptions = LocationComponentOptions.builder(context)
                 .trackingAnimationDurationMultiplier(0f)
                 .enableStaleState(false)
@@ -893,7 +898,9 @@ private fun NavMap(
                 val feats = safeties.map { Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) }
                 style.getSourceAs<GeoJsonSource>("safety-src")
                     ?.setGeoJson(FeatureCollection.fromFeatures(feats))
-                if (route != null && !navigating && !routeFitted) {
+                
+                // SOLUZIONE 3: Prevenire il crash su b.build() assicurandoci che ci siano almeno 2 punti
+                if (route != null && route.points.size >= 2 && !navigating && !routeFitted) {
                     val b = LatLngBounds.Builder()
                     route.points.forEach { b.include(LatLng(it.latitude(), it.longitude())) }
                     map.animateCamera(CameraUpdateFactory.newLatLngBounds(b.build(), 100), 800)
