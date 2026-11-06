@@ -803,17 +803,21 @@ private fun NavMap(gps: Location?, place: Place?, route: RouteData?,
                     val initialUrl = if (isDark) STYLE_NIGHT else STYLE_DAY
                     map.setStyle(Style.Builder().fromUri(initialUrl)) { style ->
                         setupMapLayers(style)
+                        // ✅ FIX: le opzioni vanno passate al builder, non assegnate dopo
+                        val locationOptions = LocationComponentOptions.builder(ctx)
+                            .trackingAnimationDurationMultiplier(0f)
+                            .enableStaleState(false)
+                            .build()
+                        val activationOptions = LocationComponentActivationOptions.builder(ctx, style)
+                            .useDefaultLocationEngine(false)
+                            .locationComponentOptions(locationOptions)
+                            .build()
+
                         val lc = map.locationComponent
-                        lc.activateLocationComponent(
-                            LocationComponentActivationOptions.builder(ctx, style)
-                                .useDefaultLocationEngine(false).build()
-                        )
+                        lc.activateLocationComponent(activationOptions)
                         lc.isLocationComponentEnabled = true
                         lc.cameraMode = CameraMode.NONE
                         lc.renderMode = RenderMode.COMPASS
-                        lc.locationComponentOptions = LocationComponentOptions.builder(ctx)
-                            .trackingAnimationDurationMultiplier(0f)
-                            .enableStaleState(false).build()
                         currentStyleUrl = initialUrl
                     }
                 }
