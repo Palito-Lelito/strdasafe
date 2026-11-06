@@ -262,7 +262,7 @@ private fun App() {
                 navigating = navigating,
                 followUser = AppState.followUser.value,
                 isDark = isDark,
-                granted = AppState.granted.value   // ← passato
+                granted = AppState.granted.value
             )
 
             AnimatedVisibility(
@@ -740,6 +740,8 @@ private fun NavMap(
     navigating: Boolean, followUser: Boolean, isDark: Boolean,
     granted: Boolean
 ) {
+    // ✅ FIX: leggiamo il context qui, NON dentro il LaunchedEffect
+    val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var mapRef by remember { mutableStateOf<MapLibreMap?>(null) }
     var mapViewRef by remember { mutableStateOf<MapView?>(null) }
@@ -749,11 +751,10 @@ private fun NavMap(
     var curZoom by remember { mutableDoubleStateOf(17.0) }
     var curTilt by remember { mutableDoubleStateOf(40.0) }
 
-    // SmoothNav con nuovo fix
     LaunchedEffect(gps) { gps?.let { SmoothNav.onNewFix(it) } }
     LaunchedEffect(navigating) { if (!navigating) { SmoothNav.reset(); routeFitted = false } }
 
-    // ⚠️ LIFECYCLE: gestisce onCreate/onStart/onResume/onPause/onStop/onDestroy del MapView
+    // Lifecycle del MapView
     DisposableEffect(lifecycleOwner, mapViewRef) {
         val mv = mapViewRef ?: return@DisposableEffect onDispose { }
         val observer = LifecycleEventObserver { _, event ->
@@ -773,7 +774,6 @@ private fun NavMap(
         }
     }
 
-    // Marker in preview (non navigazione)
     LaunchedEffect(gps, mapRef, navigating) {
         if (navigating) return@LaunchedEffect
         val map = mapRef ?: return@LaunchedEffect
@@ -781,7 +781,6 @@ private fun NavMap(
         gps?.let { map.locationComponent.forceLocationUpdate(it) }
     }
 
-    // Loop 60fps
     LaunchedEffect(navigating, followUser) {
         if (!navigating) return@LaunchedEffect
         while (true) {
@@ -825,19 +824,20 @@ private fun NavMap(
         }
     }
 
-    // ⚠️ Se granted cambia da false a true, attiva la LocationComponent
+    // Attivazione LocationComponent quando il permesso è concesso
     LaunchedEffect(granted, mapRef) {
         if (!granted) return@LaunchedEffect
         val map = mapRef ?: return@LaunchedEffect
         val style = map.style ?: return@LaunchedEffect
         if (map.locationComponent.isLocationComponentActivated) return@LaunchedEffect
         try {
-            val locationOptions = LocationComponentOptions.builder(LocalContext.current)
+            // ✅ Usa `context` (letto fuori dal LaunchedEffect), non LocalContext.current
+            val locationOptions = LocationComponentOptions.builder(context)
                 .trackingAnimationDurationMultiplier(0f)
                 .enableStaleState(false)
                 .build()
             val activationOptions = LocationComponentActivationOptions
-                .builder(LocalContext.current, style)
+                .builder(context, style)
                 .useDefaultLocationEngine(false)
                 .locationComponentOptions(locationOptions)
                 .build()
@@ -846,7 +846,7 @@ private fun NavMap(
             map.locationComponent.cameraMode = CameraMode.NONE
             map.locationComponent.renderMode = RenderMode.COMPASS
         } catch (e: SecurityException) {
-            // permesso non concesso: ignora, verrà ritentato
+            // permesso non ancora concesso, ignora
         }
     }
 
@@ -855,7 +855,6 @@ private fun NavMap(
         factory = { ctx ->
             MapView(ctx).apply {
                 mapViewRef = this
-                // ⚠️ onCreate deve essere chiamato prima di getMapAsync
                 onCreate(Bundle())
                 getMapAsync { map ->
                     mapRef = map
