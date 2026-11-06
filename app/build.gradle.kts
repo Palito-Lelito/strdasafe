@@ -6,7 +6,6 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-// Legge ORS_API_KEY da local.properties (gitignored) o variabile d'ambiente
 val orsKey: String = run {
     val f = rootProject.file("local.properties")
     val props = Properties().apply { if (f.exists()) f.inputStream().use { load(it) } }
@@ -54,6 +53,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1")
     implementation("org.maplibre.gl:android-sdk:11.7.0")
