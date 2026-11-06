@@ -1,7 +1,16 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+// Legge ORS_API_KEY da local.properties (gitignored) o variabile d'ambiente
+val orsKey: String = run {
+    val f = rootProject.file("local.properties")
+    val props = Properties().apply { if (f.exists()) f.inputStream().use { load(it) } }
+    props.getProperty("ORS_API_KEY") ?: System.getenv("ORS_API_KEY") ?: ""
 }
 
 android {
@@ -14,20 +23,26 @@ android {
         targetSdk = 36
         versionCode = 8
         versionName = "1.1.0"
+        buildConfigField("String", "ORS_API_KEY", "\"$orsKey\"")
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+        }
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
+    kotlinOptions { jvmTarget = "17" }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
+    packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
 }
 
 dependencies {
@@ -39,11 +54,8 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
-    
-    // GPS e Coroutines
     implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1")
-    
-    // MapLibre per la mappa offline/online
     implementation("org.maplibre.gl:android-sdk:11.7.0")
+    debugImplementation("androidx.compose.ui:ui-tooling")
 }
