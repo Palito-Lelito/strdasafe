@@ -56,6 +56,6 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1")
-    implementation("org.maplibre.gl:android-sdk:11.7.0")
+    implementation("org.maplibre.gl:android-sdk-vulkan-opengl:11.7.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
