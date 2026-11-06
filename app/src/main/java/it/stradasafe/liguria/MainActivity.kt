@@ -757,9 +757,14 @@ private fun NavMap(
     // Lifecycle del MapView
     DisposableEffect(lifecycleOwner, mapViewRef) {
         val mv = mapViewRef ?: return@DisposableEffect onDispose { }
+        // Riallinea lo stato del MapView allo stato attuale del lifecycle
+        val state = lifecycleOwner.lifecycle.currentState
+        if (state.isAtLeast(Lifecycle.State.CREATED)) mv.onCreate(Bundle())
+        if (state.isAtLeast(Lifecycle.State.STARTED)) mv.onStart()
+        if (state.isAtLeast(Lifecycle.State.RESUMED)) mv.onResume()
+    
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_CREATE -> mv.onCreate(Bundle())
                 Lifecycle.Event.ON_START -> mv.onStart()
                 Lifecycle.Event.ON_RESUME -> mv.onResume()
                 Lifecycle.Event.ON_PAUSE -> mv.onPause()
@@ -855,7 +860,6 @@ private fun NavMap(
         factory = { ctx ->
             MapView(ctx).apply {
                 mapViewRef = this
-                onCreate(Bundle())
                 getMapAsync { map ->
                     mapRef = map
                     map.cameraPosition = CameraPosition.Builder()
