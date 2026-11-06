@@ -40,12 +40,15 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import it.stradasafe.liguria.ui.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -258,7 +261,8 @@ private fun App() {
                 route = AppState.route.value,
                 navigating = navigating,
                 followUser = AppState.followUser.value,
-                isDark = isDark
+                isDark = isDark,
+                granted = AppState.granted.value   // ← passato
             )
 
             AnimatedVisibility(
@@ -727,9 +731,16 @@ private fun EtaCard(speed: Int, speedLimit: Int?, inTutor: Boolean, tutorAvg: Do
     }
 }
 
+// ============================================================
+// NAVMAP con lifecycle corretto + LocationComponent condizionale
+// ============================================================
 @Composable
-private fun NavMap(gps: Location?, place: Place?, route: RouteData?,
-                   navigating: Boolean, followUser: Boolean, isDark: Boolean) {
+private fun NavMap(
+    gps: Location?, place: Place?, route: RouteData?,
+    navigating: Boolean, followUser: Boolean, isDark: Boolean,
+    granted: Boolean
+) {
+    val lifecycleOwner = LocalLifecycleOwner.current
     var mapRef by remember { mutableStateOf<MapLibreMap?>(null) }
     var mapViewRef by remember { mutableStateOf<MapView?>(null) }
     var routeFitted by remember { mutableStateOf(false) }
@@ -738,9 +749,31 @@ private fun NavMap(gps: Location?, place: Place?, route: RouteData?,
     var curZoom by remember { mutableDoubleStateOf(17.0) }
     var curTilt by remember { mutableDoubleStateOf(40.0) }
 
+    // SmoothNav con nuovo fix
     LaunchedEffect(gps) { gps?.let { SmoothNav.onNewFix(it) } }
     LaunchedEffect(navigating) { if (!navigating) { SmoothNav.reset(); routeFitted = false } }
 
+    // ⚠️ LIFECYCLE: gestisce onCreate/onStart/onResume/onPause/onStop/onDestroy del MapView
+    DisposableEffect(lifecycleOwner, mapViewRef) {
+        val mv = mapViewRef ?: return@DisposableEffect onDispose { }
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_CREATE -> mv.onCreate(Bundle())
+                Lifecycle.Event.ON_START -> mv.onStart()
+                Lifecycle.Event.ON_RESUME -> mv.onResume()
+                Lifecycle.Event.ON_PAUSE -> mv.onPause()
+                Lifecycle.Event.ON_STOP -> mv.onStop()
+                Lifecycle.Event.ON_DESTROY -> mv.onDestroy()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // Marker in preview (non navigazione)
     LaunchedEffect(gps, mapRef, navigating) {
         if (navigating) return@LaunchedEffect
         val map = mapRef ?: return@LaunchedEffect
@@ -748,6 +781,7 @@ private fun NavMap(gps: Location?, place: Place?, route: RouteData?,
         gps?.let { map.locationComponent.forceLocationUpdate(it) }
     }
 
+    // Loop 60fps
     LaunchedEffect(navigating, followUser) {
         if (!navigating) return@LaunchedEffect
         while (true) {
@@ -791,11 +825,38 @@ private fun NavMap(gps: Location?, place: Place?, route: RouteData?,
         }
     }
 
+    // ⚠️ Se granted cambia da false a true, attiva la LocationComponent
+    LaunchedEffect(granted, mapRef) {
+        if (!granted) return@LaunchedEffect
+        val map = mapRef ?: return@LaunchedEffect
+        val style = map.style ?: return@LaunchedEffect
+        if (map.locationComponent.isLocationComponentActivated) return@LaunchedEffect
+        try {
+            val locationOptions = LocationComponentOptions.builder(LocalContext.current)
+                .trackingAnimationDurationMultiplier(0f)
+                .enableStaleState(false)
+                .build()
+            val activationOptions = LocationComponentActivationOptions
+                .builder(LocalContext.current, style)
+                .useDefaultLocationEngine(false)
+                .locationComponentOptions(locationOptions)
+                .build()
+            map.locationComponent.activateLocationComponent(activationOptions)
+            map.locationComponent.isLocationComponentEnabled = true
+            map.locationComponent.cameraMode = CameraMode.NONE
+            map.locationComponent.renderMode = RenderMode.COMPASS
+        } catch (e: SecurityException) {
+            // permesso non concesso: ignora, verrà ritentato
+        }
+    }
+
     AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory = { ctx ->
             MapView(ctx).apply {
                 mapViewRef = this
+                // ⚠️ onCreate deve essere chiamato prima di getMapAsync
+                onCreate(Bundle())
                 getMapAsync { map ->
                     mapRef = map
                     map.cameraPosition = CameraPosition.Builder()
@@ -803,21 +864,6 @@ private fun NavMap(gps: Location?, place: Place?, route: RouteData?,
                     val initialUrl = if (isDark) STYLE_NIGHT else STYLE_DAY
                     map.setStyle(Style.Builder().fromUri(initialUrl)) { style ->
                         setupMapLayers(style)
-                        // ✅ FIX: le opzioni vanno passate al builder, non assegnate dopo
-                        val locationOptions = LocationComponentOptions.builder(ctx)
-                            .trackingAnimationDurationMultiplier(0f)
-                            .enableStaleState(false)
-                            .build()
-                        val activationOptions = LocationComponentActivationOptions.builder(ctx, style)
-                            .useDefaultLocationEngine(false)
-                            .locationComponentOptions(locationOptions)
-                            .build()
-
-                        val lc = map.locationComponent
-                        lc.activateLocationComponent(activationOptions)
-                        lc.isLocationComponentEnabled = true
-                        lc.cameraMode = CameraMode.NONE
-                        lc.renderMode = RenderMode.COMPASS
                         currentStyleUrl = initialUrl
                     }
                 }
