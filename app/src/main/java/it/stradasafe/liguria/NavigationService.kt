@@ -1,14 +1,12 @@
 package it.stradasafe.liguria
 
 import android.app.*
-import android.content.Context
 import android.content.Intent
 import android.location.Location
 import android.media.AudioAttributes
 import android.os.Build
 import android.os.IBinder
 import android.speech.tts.TextToSpeech
-import android.speech.tts.UtteranceProgressListener
 import androidx.core.app.NotificationCompat
 import com.google.android.gms.location.*
 import kotlinx.coroutines.*
@@ -16,13 +14,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
+import org.maplibre.geojson.Point
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.util.Locale
 import kotlin.math.*
 
-/** Bus per condividere la posizione dal Service alla UI */
 object LocationBus {
     private val _location = MutableStateFlow<Location?>(null)
     val location: StateFlow<Location?> = _location.asStateFlow()
@@ -30,7 +28,6 @@ object LocationBus {
     fun current(): Location? = _location.value
 }
 
-/** Stato di navigazione condiviso Service <-> UI */
 object NavState {
     val navigating = MutableStateFlow(false)
     val muted = MutableStateFlow(false)
@@ -41,7 +38,7 @@ object NavState {
     val speedLimit = MutableStateFlow<Int?>(null)
 
     @Volatile var steps: List<Step> = emptyList()
-    @Volatile var routePoints: List<org.maplibre.geojson.Point> = emptyList()
+    @Volatile var routePoints: List<Point> = emptyList()
     @Volatile var activeDevices: List<SafetyDevice> = emptyList()
     @Volatile var alertedIds: MutableSet<String> = mutableSetOf()
     @Volatile var destLat: Double? = null
@@ -54,9 +51,7 @@ class NavigationService : Service() {
 
     companion object {
         private var instance: NavigationService? = null
-        fun speakNow(text: String) {
-            instance?.speak(text, flush = true)
-        }
+        fun speakNow(text: String) { instance?.speak(text, flush = true) }
     }
 
     private lateinit var fused: FusedLocationProviderClient
@@ -66,9 +61,7 @@ class NavigationService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var lastKnownLocation: Location? = null
     private var lastGoodLocation: Location? = null
-    private var lastSimCheck = 0L
     private var lastSpeedLimitCheck = 0L
-    private var lastTutorCheck = 0L
     private var tutorStartTime = 0L
     private var tutorStartDistanceRemaining = 0.0
     private var lastSpokenStep = -1
@@ -123,7 +116,6 @@ class NavigationService : Service() {
             .setMinUpdateIntervalMillis(500)
             .setMinUpdateDistanceMeters(0f)
             .build()
-
         val cb = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 result.lastLocation?.let { handleLocation(it) }
@@ -138,7 +130,7 @@ class NavigationService : Service() {
         val prev = lastKnownLocation
         if (prev != null) {
             val dt = (newLoc.time - prev.time) / 1000.0
-            if (dt > 0 && (prev.distanceTo(newLoc) / dt) > 55.0) return // salto teletrasporto
+            if (dt > 0 && (prev.distanceTo(newLoc) / dt) > 55.0) return
         }
         lastKnownLocation = newLoc
         lastGoodLocation = newLoc
@@ -151,7 +143,6 @@ class NavigationService : Service() {
             if (!NavState.navigating.value) continue
             val gps = LocationBus.current() ?: continue
 
-            // ---- Simulazione galleria ----
             val lastGood = lastGoodLocation
             val since = System.currentTimeMillis() - (lastGood?.time ?: 0L)
             if (since > 12000 && gps.speed > 3f && lastGood != null) {
@@ -165,9 +156,8 @@ class NavigationService : Service() {
             }
 
             val effective = LocationBus.current() ?: continue
-
-            // ---- Speed limit ogni 20s ----
             val now = System.currentTimeMillis()
+
             if (now - lastSpeedLimitCheck > 20000 && !NavState.isSimulating.value) {
                 lastSpeedLimitCheck = now
                 scope.launch {
@@ -177,7 +167,6 @@ class NavigationService : Service() {
                 }
             }
 
-            // ---- Step index ----
             val steps = NavState.steps
             val idx = NavState.currentStepIdx.value
             if (steps.isNotEmpty() && idx < steps.lastIndex) {
@@ -189,7 +178,6 @@ class NavigationService : Service() {
                 }
             }
 
-            // ---- TTS istruzione corrente ----
             val currentIdx = NavState.currentStepIdx.value
             if (currentIdx in steps.indices && lastSpokenStep != currentIdx && !NavState.muted.value) {
                 val s = steps[currentIdx]
@@ -203,7 +191,6 @@ class NavigationService : Service() {
                 lastSpokenStep = currentIdx
             }
 
-            // ---- Safety devices ----
             for (dev in NavState.activeDevices) {
                 if (dev.id in NavState.alertedIds) continue
                 val d = distanceMeters(effective.latitude, effective.longitude, dev.lat, dev.lon)
@@ -225,7 +212,6 @@ class NavigationService : Service() {
                 }
             }
 
-            // ---- Calcolo media Tutor ----
             if (NavState.isInTutor.value) {
                 val elapsed = (now - tutorStartTime) / 1000.0
                 if (elapsed > 5.0) {
@@ -233,10 +219,8 @@ class NavigationService : Service() {
                         (NavState.routePoints.lastOrNull()?.let {
                             distanceMeters(effective.latitude, effective.longitude, it.latitude(), it.longitude())
                         } ?: 0.0)
-                    val avg = (done / elapsed) * 3.6
-                    NavState.tutorAvgSpeed.value = avg.toFloat()
+                    NavState.tutorAvgSpeed.value = ((done / elapsed) * 3.6).toFloat()
                 }
-                // Fine Tutor quando esci dal raggio di 500m
                 val stillNear = NavState.activeDevices.any {
                     it.type.lowercase().contains("tutor") &&
                         distanceMeters(effective.latitude, effective.longitude, it.lat, it.lon) < 500.0
@@ -247,13 +231,11 @@ class NavigationService : Service() {
                 }
             }
 
-            // ---- Reroute ----
             val offRoute = distanceToPolyline(effective.latitude, effective.longitude, NavState.routePoints) > 80.0
             if (offRoute && !NavState.isSimulating.value && effective.accuracy < 30f &&
                 now - lastReroute > 15000) {
                 lastReroute = now
                 if (!NavState.muted.value) speak("Ricalcolo in corso")
-                // Il ricalcolo vero avviene in MainActivity che osserva NavState; per semplicità qui solo segnalazione
             }
         }
     }
@@ -274,8 +256,6 @@ class NavigationService : Service() {
             latitude = Math.toDegrees(lat2)
             longitude = Math.toDegrees(lon2)
             provider = "simulated"
-            speed = last.speed
-            bearing = last.bearing
         }
     }
 
@@ -334,8 +314,6 @@ class NavigationService : Service() {
     }
 }
 
-// ---- Utility geometriche ----
-
 fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
     val r = 6371000.0
     val p1 = Math.toRadians(lat1); val p2 = Math.toRadians(lat2)
@@ -344,7 +322,7 @@ fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Doub
     return 2 * r * atan2(sqrt(x), sqrt(1 - x))
 }
 
-fun distanceToPolyline(lat: Double, lon: Double, pts: List<org.maplibre.geojson.Point>): Double {
+fun distanceToPolyline(lat: Double, lon: Double, pts: List<Point>): Double {
     if (pts.isEmpty()) return Double.MAX_VALUE
     var minD = Double.MAX_VALUE
     val cosLat = cos(Math.toRadians(lat))
