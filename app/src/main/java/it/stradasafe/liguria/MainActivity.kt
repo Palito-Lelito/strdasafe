@@ -1,27 +1,18 @@
 package it.stradasafe.liguria
 
 import android.Manifest
-import android.annotation.SuppressLint
 import android.app.Activity
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.location.Location
-import android.media.AudioAttributes
 import android.os.Build
 import android.os.Bundle
-import android.os.IBinder
-import android.speech.tts.TextToSpeech
-import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -32,26 +23,19 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import com.google.android.gms.location.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.collectAsState
 import org.json.JSONArray
 import org.json.JSONObject
 import org.maplibre.android.MapLibre
@@ -64,8 +48,8 @@ import org.maplibre.android.location.modes.CameraMode
 import org.maplibre.android.location.modes.RenderMode
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
-import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.PropertyFactory.*
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
@@ -75,38 +59,13 @@ import org.maplibre.geojson.Point
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
-import java.util.Locale
 import kotlin.math.*
 
-// CHIAVE OPENROUTESERVICE E MOTORE DI RICERCA
-private const val ORS_API_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImZjZDcxY2MyNmJiNjQwYzU4OTIzZDY0ZGE2MDEyMWJiIiwiaCI6Im11cm11cjY0In0="
+// ---- Costanti ----
 private const val SEARCH_BASE = "https://nominatim.openstreetmap.org"
+private const val STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
 
-class NavigationService : Service() {
-    override fun onBind(intent: Intent?): IBinder? = null
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == "STOP") {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
-            return START_NOT_STICKY
-        }
-        val channelId = "stradasafe_nav"
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(channelId, "Navigazione Attiva", NotificationManager.IMPORTANCE_LOW)
-            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
-        }
-        val notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("StradaSafe 1.1")
-            .setContentText("Navigazione in background attiva")
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-            .setOngoing(true)
-            .build()
-        startForeground(1, notification)
-        return START_STICKY
-    }
-}
-
-// Colori Universali
+// ---- Colori ----
 private val AppleBlue = Color(0xFF0A84FF)
 private val WazeCyan = Color(0xFF64D2FF)
 private val WazeGreen = Color(0xFF32D74B)
@@ -114,12 +73,9 @@ private val AlertAmber = Color(0xFFFF9F0A)
 private val AlertRed = Color(0xFFFF453A)
 private val TextGray = Color(0xFF8E8E93)
 
-enum class ThemeMode(val label: String) {
-    AUTO("⚙️ Auto"),
-    LIGHT("☀️ Chiara"),
-    DARK("🌙 Scura")
-}
+enum class ThemeMode(val label: String) { AUTO("Auto"), LIGHT("Chiara"), DARK("Scura") }
 
+// ---- Stato applicativo (Compose) ----
 object AppState {
     val query = mutableStateOf("")
     val searchResults = mutableStateOf<List<Place>>(emptyList())
@@ -129,536 +85,381 @@ object AppState {
     val navigating = mutableStateOf(false)
     val followUser = mutableStateOf(true)
     val isSearchExpanded = mutableStateOf(false)
-    val stepIndex = mutableIntStateOf(0)
-    
+    val busy = mutableStateOf(false)
+    val error = mutableStateOf<String?>(null)
+    val muted = mutableStateOf(false)
     val avoidTolls = mutableStateOf(false)
     val avoidHighways = mutableStateOf(false)
-    
     val safetyDevices = mutableStateOf<List<SafetyDevice>>(emptyList())
-    val activeSafetyDevices = mutableStateOf<List<SafetyDevice>>(emptyList())
-    val alertedDevices = mutableSetOf<SafetyDevice>()
-    
-    val speedLimit = mutableStateOf<Int?>(null)
-    val lastSpeedLimitCheck = mutableLongStateOf(0L)
-
-    val inTutorZone = mutableStateOf(false)
-    val tutorStartTime = mutableLongStateOf(0L)
-    val tutorStartDistanceRemaining = mutableDoubleStateOf(0.0)
-
     val themeMode = mutableStateOf(ThemeMode.AUTO)
+    val granted = mutableStateOf(false)
 }
 
-class MainActivity : ComponentActivity() {
-    private lateinit var client: FusedLocationProviderClient
+// ---- Modelli ----
+data class Place(val name: String, val lat: Double, val lon: Double)
+data class Step(val text: String, val lat: Double, val lon: Double, val distance: Double = 0.0)
+data class RouteData(val points: List<Point>, val distance: Double, val duration: Double, val steps: List<Step>)
+data class SafetyDevice(val id: String, val lat: Double, val lon: Double, val type: String, val speedLimit: Int? = null)
 
+// ---- Activity ----
+class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         MapLibre.getInstance(this)
-        client = LocationServices.getFusedLocationProviderClient(this)
-        setContent { App(client) }
+        setContent { App() }
     }
 }
 
-data class Place(val name: String, val lat: Double, val lon: Double)
-data class Step(val text: String, val lat: Double, val lon: Double, val distance: Double, val duration: Double, val maneuver: String)
-data class RouteData(val points: List<Point>, val distance: Double, val duration: Double, val steps: List<Step>)
-data class SafetyDevice(val lat: Double, val lon: Double, val type: String)
-
-// OROLOGIO ASTRONOMICO TARATO PER LA LIGURIA
+// ---- Orologio astronomico ----
 private fun isNightLocal(): Boolean {
     val cal = java.util.Calendar.getInstance()
-    val month = cal.get(java.util.Calendar.MONTH) // 0=Gen, 11=Dic
+    val month = cal.get(java.util.Calendar.MONTH)
     val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
     val minute = cal.get(java.util.Calendar.MINUTE)
     val time = hour + minute / 60.0
-
-    // Orari medi di alba e tramonto per la Liguria
-    val sunrises = floatArrayOf(7.8f, 7.3f, 6.5f, 6.6f, 6.0f, 5.7f, 5.9f, 6.3f, 7.0f, 7.6f, 7.3f, 7.8f)
-    val sunsets = floatArrayOf(17.1f, 17.8f, 18.4f, 20.2f, 20.8f, 21.2f, 21.0f, 20.5f, 19.6f, 18.6f, 17.0f, 16.8f)
-
+    val sunrises = floatArrayOf(7.8f, 7.3f, 6.5f, 6.6f, 6.0f, 5.7f, 5.9f, 6.3f, 7.0f, 7.5f, 7.4f, 7.9f)
+    val sunsets  = floatArrayOf(17.1f, 17.8f, 18.4f, 20.2f, 20.8f, 21.2f, 21.0f, 20.4f, 19.6f, 18.7f, 17.8f, 16.9f)
     return time < sunrises[month] || time > sunsets[month]
 }
 
-@SuppressLint("MissingPermission")
+// ---- Main Composable ----
 @Composable
-private fun rememberGps(client: FusedLocationProviderClient, granted: Boolean): Location? {
-    var location by remember { mutableStateOf<Location?>(null) }
-    DisposableEffect(granted) {
-        if (!granted) return@DisposableEffect onDispose {}
-        val cb = object : LocationCallback() {
-            override fun onLocationResult(r: LocationResult) {
-                r.lastLocation?.let { newLoc ->
-                    if (newLoc.accuracy < 40f) {
-                        val currentLoc = location
-                        if (currentLoc != null) {
-                            val timeDelta = (newLoc.time - currentLoc.time) / 1000f
-                            val dist = currentLoc.distanceTo(newLoc)
-                            if (timeDelta > 0 && (dist / timeDelta) > 55f) return@let 
-                        }
-                        location = newLoc 
-                    }
-                }
-            }
-        }
-        
-        val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 500)
-            .setMinUpdateIntervalMillis(500)
-            .setMinUpdateDistanceMeters(0f)
-            .build()
-            
-        client.requestLocationUpdates(req, cb, null)
-        onDispose { client.removeLocationUpdates(cb) }
-    }
-    return location
-}
-
-@Composable
-private fun rememberSpeaker(): Pair<TextToSpeech?, Boolean> {
-    val context = LocalContext.current
-    var ready by remember { mutableStateOf(false) }
-    var tts by remember { mutableStateOf<TextToSpeech?>(null) }
-
-    DisposableEffect(Unit) {
-        var engine: TextToSpeech? = null
-        engine = TextToSpeech(context) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                engine?.language = Locale.ITALIAN
-                engine?.setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                        .build()
-                )
-                ready = true
-            }
-        }
-        tts = engine
-        onDispose { engine?.stop(); engine?.shutdown() }
-    }
-    return tts to ready
-}
-
-private fun simulateMovement(lastLoc: Location, timeDeltaMs: Long): Location {
-    val distanceMeters = (lastLoc.speed) * (timeDeltaMs / 1000f)
-    val r = 6371000.0
-    val lat1 = Math.toRadians(lastLoc.latitude)
-    val lon1 = Math.toRadians(lastLoc.longitude)
-    val brng = Math.toRadians(lastLoc.bearing.toDouble())
-    
-    val lat2 = asin(sin(lat1) * cos(distanceMeters / r) + cos(lat1) * sin(distanceMeters / r) * cos(brng))
-    val lon2 = lon1 + atan2(sin(brng) * sin(distanceMeters / r) * cos(lat1), cos(distanceMeters / r) - sin(lat1) * sin(lat2))
-    
-    return Location(lastLoc).apply {
-        latitude = Math.toDegrees(lat2)
-        longitude = Math.toDegrees(lon2)
-        provider = "simulated"
-    }
-}
-
-private fun snapToRoute(lat: Double, lon: Double, routePts: List<Point>): Pair<Double, Double> {
-    if (routePts.isEmpty()) return lat to lon
-    var minDistance = Double.MAX_VALUE
-    var snappedLat = lat
-    var snappedLon = lon
-    val cosLat = cos(Math.toRadians(lat))
-
-    for (i in 0 until routePts.size - 1) {
-        val p1 = routePts[i]
-        val p2 = routePts[i+1]
-        
-        val x0 = lon * cosLat; val y0 = lat
-        val x1 = p1.longitude() * cosLat; val y1 = p1.latitude()
-        val x2 = p2.longitude() * cosLat; val y2 = p2.latitude()
-
-        val dx = x2 - x1
-        val dy = y2 - y1
-        if (dx == 0.0 && dy == 0.0) continue
-
-        val t = ((x0 - x1) * dx + (y0 - y1) * dy) / (dx * dx + dy * dy)
-        val closestX = when { t < 0 -> x1; t > 1 -> x2; else -> x1 + t * dx }
-        val closestY = when { t < 0 -> y1; t > 1 -> y2; else -> y1 + t * dy }
-
-        val projLon = closestX / cosLat
-        val projLat = closestY
-
-        val d = distanceMeters(lat, lon, projLat, projLon)
-        if (d < minDistance) {
-            minDistance = d
-            snappedLat = projLat
-            snappedLon = projLon
-        }
-    }
-    return if (minDistance < 50.0) snappedLat to snappedLon else lat to lon
-}
-
-@Composable
-private fun App(client: FusedLocationProviderClient) {
+private fun App() {
     val context = LocalContext.current
     val activity = context as? Activity
     val scope = rememberCoroutineScope()
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-    val (tts, ttsReady) = rememberSpeaker()
 
-    val themeMode = AppState.themeMode.value
-    var isDarkTheme by remember { mutableStateOf(false) }
+    val gps by LocationBus.location.collectAsState()
+    val navigating by NavState.navigating.collectAsState()
+    val muted by NavState.muted.collectAsState()
+    val speedLimit by NavState.speedLimit.collectAsState()
+    val isSimulating by NavState.isSimulating.collectAsState()
+    val inTutor by NavState.isInTutor.collectAsState()
+    val tutorAvg by NavState.tutorAvgSpeed.collectAsState()
+    val currentStepIdx by NavState.currentStepIdx.collectAsState()
+    val currentStep = NavState.steps.getOrNull(currentStepIdx)
+    val distanceToStep = if (gps != null && currentStep != null)
+        distanceMeters(gps!!.latitude, gps!!.longitude, currentStep.lat, currentStep.lon) else 0.0
 
-    LaunchedEffect(themeMode) {
+    // ---- Tema ----
+    var isDark by remember { mutableStateOf(false) }
+    LaunchedEffect(AppState.themeMode.value) {
         while (true) {
-            isDarkTheme = when (themeMode) {
+            isDark = when (AppState.themeMode.value) {
                 ThemeMode.DARK -> true
                 ThemeMode.LIGHT -> false
                 ThemeMode.AUTO -> isNightLocal()
             }
-            delay(60000) 
+            delay(60000)
         }
     }
-
-    val colorScheme = if (isDarkTheme) {
+    val colorScheme = if (isDark) {
         darkColorScheme(
             background = Color(0xFF000000),
             surface = Color(0xE61C1C1E),
-            onBackground = Color(0xFFFFFFFF),
+            onBackground = Color.White,
             primary = AppleBlue
         )
     } else {
         lightColorScheme(
             background = Color(0xFFF2F2F7),
             surface = Color(0xE6FFFFFF),
-            onBackground = Color(0xFF000000),
+            onBackground = Color.Black,
             primary = AppleBlue
         )
     }
 
-    val mapStyleUrl = if (isDarkTheme) {
-        "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
-    } else {
-        "https://tiles.openfreemap.org/styles/liberty"
+    // ---- Permission launcher ----
+    val permLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { perms ->
+        AppState.granted.value = perms[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // POST_NOTIFICATIONS è opzionale, non blocca il GPS
+        }
     }
-
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            AppState.safetyDevices.value = loadSafetyDevices(context)
-            AppState.searchHistory.value = loadHistory(context)
+        AppState.granted.value = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED) {
+            permLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
         }
     }
 
-    var query by AppState.query
-    var searchResults by AppState.searchResults
-    var searchHistory by AppState.searchHistory
-    var place by AppState.place
-    var route by AppState.route
-    var navigating by AppState.navigating
-    var followUser by AppState.followUser
-    var isSearchExpanded by AppState.isSearchExpanded
-    var stepIndex by AppState.stepIndex
-    var speedLimit by AppState.speedLimit
-    
-    var avoidTolls by AppState.avoidTolls
-    var avoidHighways by AppState.avoidHighways
+    // ---- Caricamento safety devices ----
+    LaunchedEffect(Unit) {
+        AppState.safetyDevices.value = loadSafetyDevices(context)
+        AppState.searchHistory.value = loadHistory(context)
+    }
 
-    var granted by remember { mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) }
-    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
-    val rawGps = rememberGps(client, granted)
-    
-    var effectiveGps by remember { mutableStateOf<Location?>(null) }
-    var isSimulating by remember { mutableStateOf(false) }
-    
-    DisposableEffect(navigating) {
-        if (navigating) activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        else activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        onDispose { activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
-    }
-    
-    LaunchedEffect(rawGps, navigating) {
-        if (rawGps != null) { effectiveGps = rawGps; isSimulating = false }
-    }
-    
-    LaunchedEffect(navigating) {
-        while(navigating) {
-            delay(1000)
-            if (effectiveGps != null) {
-                val timeSinceLastGps = System.currentTimeMillis() - effectiveGps!!.time
-                if (timeSinceLastGps > 12000 && effectiveGps!!.speed > 3f) {
-                    isSimulating = true
-                    effectiveGps = simulateMovement(effectiveGps!!, 1000)
-                    effectiveGps!!.time = System.currentTimeMillis()
-                }
-            }
+    // ---- Redirect GPS se granted ----
+    LaunchedEffect(AppState.granted.value) {
+        if (AppState.granted.value) {
+            // il service parte solo quando si naviga; qui niente
         }
     }
 
-    var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var muted by remember { mutableStateOf(false) }
-    var lastSpoken by remember { mutableIntStateOf(-1) }
-    var lastReroute by remember { mutableLongStateOf(0L) }
-    var avgTutorSpeed by remember { mutableIntStateOf(0) }
-    
-    var showStopButton by remember { mutableStateOf(true) }
-
-    val currentStep = route?.steps?.getOrNull(stepIndex)
-    val distanceToStep = if (effectiveGps != null && currentStep != null) distanceMeters(effectiveGps!!.latitude, effectiveGps!!.longitude, currentStep.lat, currentStep.lon) else Double.NaN
-
-    val speed = ((effectiveGps?.speed ?: 0f) * 3.6f).roundToInt().coerceAtLeast(0)
-    val remainingDistance = route?.steps?.drop(stepIndex)?.sumOf { it.distance } ?: 0.0
-    val remainingDuration = route?.steps?.drop(stepIndex)?.sumOf { it.duration } ?: 0.0
-
-    LaunchedEffect(showStopButton, navigating) {
-        if (navigating && showStopButton) { delay(10000); showStopButton = false }
-    }
-
-    LaunchedEffect(navigating) {
-        try {
-            val serviceIntent = Intent(context, NavigationService::class.java)
-            if (navigating) ContextCompat.startForegroundService(context, serviceIntent)
-            else { serviceIntent.action = "STOP"; context.startService(serviceIntent) }
-        } catch (e: Exception) {}
-    }
-
-    LaunchedEffect(effectiveGps, navigating, route) {
-        if (!navigating || effectiveGps == null || route == null) return@LaunchedEffect
-        val currentTime = System.currentTimeMillis()
-
-        if (currentTime - AppState.lastSpeedLimitCheck.longValue > 20000 && !isSimulating) {
-            AppState.lastSpeedLimitCheck.longValue = currentTime
-            scope.launch {
-                val limit = fetchSpeedLimit(effectiveGps!!.latitude, effectiveGps!!.longitude)
-                if (limit != null) speedLimit = limit
-            }
-        }
-
-        val steps = route!!.steps
-        if (stepIndex < steps.lastIndex && distanceToStep < 30) stepIndex++
-
-        val s = steps.getOrNull(stepIndex)
-        if (s != null && stepIndex != lastSpoken && distanceMeters(effectiveGps!!.latitude, effectiveGps!!.longitude, s.lat, s.lon) < 300) {
-            if (!muted && ttsReady) tts?.speak("Tra ${distanceMeters(effectiveGps!!.latitude, effectiveGps!!.longitude, s.lat, s.lon).roundToInt()} metri, ${s.text}", TextToSpeech.QUEUE_ADD, null, "step-$stepIndex")
-            lastSpoken = stepIndex
-        }
-
-        val unalerted = AppState.activeSafetyDevices.value.filter { it !in AppState.alertedDevices }
-        val nearbyDevice = unalerted.firstOrNull { distanceMeters(effectiveGps!!.latitude, effectiveGps!!.longitude, it.lat, it.lon) < 500 }
-        
-        if (nearbyDevice != null) {
-            AppState.alertedDevices.add(nearbyDevice)
-            val isTutor = nearbyDevice.type.lowercase().contains("tutor")
-
-            if (isTutor) {
-                if (!AppState.inTutorZone.value) {
-                    AppState.inTutorZone.value = true
-                    AppState.tutorStartTime.longValue = currentTime
-                    AppState.tutorStartDistanceRemaining.doubleValue = remainingDistance
-                    if (!muted && ttsReady) tts?.speak("Inizio misurazione Tutor", TextToSpeech.QUEUE_ADD, null, "tutor_start")
-                } else {
-                    AppState.inTutorZone.value = false
-                    if (!muted && ttsReady) tts?.speak("Fine zona Tutor", TextToSpeech.QUEUE_ADD, null, "tutor_end")
-                }
-            } else {
-                if (!muted && ttsReady) tts?.speak("Attenzione, ${nearbyDevice.type} a 500 metri", TextToSpeech.QUEUE_ADD, null, "safety_${nearbyDevice.hashCode()}")
-            }
-        }
-
-        val offRoute = distanceToPolyline(effectiveGps!!.latitude, effectiveGps!!.longitude, route!!.points) > 80
-        if (offRoute && !isSimulating && effectiveGps!!.accuracy < 30f && currentTime - lastReroute > 15000) {
-            lastReroute = currentTime
-            scope.launch {
-                try {
-                    val currentBearing = if (effectiveGps!!.hasBearing() && effectiveGps!!.speed > 1.5f) effectiveGps!!.bearing.toDouble() else null
-                    val newRoute = fetchRoute(effectiveGps!!, place!!, avoidTolls, avoidHighways, currentBearing)
-                    route = newRoute
-                    AppState.activeSafetyDevices.value = AppState.safetyDevices.value.filter { distanceToPolyline(it.lat, it.lon, newRoute.points) < 100.0 }
-                    stepIndex = 0; lastSpoken = -1
-                    if (!muted && ttsReady) tts?.speak("Ricalcolo in corso", TextToSpeech.QUEUE_FLUSH, null, "reroute")
-                } catch (_: Exception) {}
-            }
-        }
-    }
-
+    // ---- Frame ----
     MaterialTheme(colorScheme = colorScheme) {
-        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-            
-            Box(Modifier.fillMaxSize().pointerInput(Unit) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                        if (event.changes.any { it.pressed } && navigating) followUser = false
-                    }
-                }
-            }) {
-                NavMap(effectiveGps, place, route, navigating, followUser, speed, mapStyleUrl)
-            }
-            
+        Box(Modifier.fillMaxSize().background(colorScheme.background)) {
+            NavMap(gps, AppState.place.value, AppState.route.value, navigating, AppState.followUser.value, speedLimit)
             if (navigating && isSimulating) {
-                Surface(color = AlertAmber, shape = RectangleShape, modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter).padding(top = 24.dp)) {
-                    Text("SEGNALE GPS PERSO - SIMULAZIONE IN CORSO", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(8.dp))
+                Surface(color = AlertAmber, modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()) {
+                    Text("SEGNALE GPS PERSO - SIMULAZIONE IN CORSO",
+                        color = Color.Black, modifier = Modifier.padding(8.dp), fontSize = 12.sp)
                 }
             }
-
-            Box(Modifier.fillMaxSize().systemBarsPadding().padding(16.dp)) {
+            Box(Modifier.fillMaxSize().padding(16.dp)) {
                 if (isLandscape) {
-                    Column(modifier = Modifier.fillMaxHeight().widthIn(max = 340.dp), verticalArrangement = Arrangement.SpaceBetween) {
-                        Column {
-                            if (!navigating) { TopStatusBar(effectiveGps); Spacer(Modifier.height(10.dp)) }
-                            if (navigating && route != null) ManeuverCard(currentStep, distanceToStep, muted, onMuteToggle = { muted = !muted })
-                        }
-                        
-                        Column(horizontalAlignment = Alignment.End) {
-                            if (navigating && !followUser) {
-                                Button(onClick = { followUser = true }, shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue, contentColor = Color.White), modifier = Modifier.padding(bottom = 16.dp).shadow(8.dp)) {
-                                    Text("📍 RICENTRA", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                }
+                    Column(Modifier.fillMaxHeight().widthIn(max = 340.dp)) {
+                        if (!navigating) TopStatusBar(gps)
+                        Spacer(Modifier.height(12.dp))
+                        if (navigating && currentStep != null) {
+                            ManeuverCard(currentStep, distanceToStep, muted) {
+                                NavState.muted.value = !NavState.muted.value
+                                AppState.muted.value = NavState.muted.value
                             }
-
-                            if (navigating && route != null) {
-                                EtaCard(speed, speedLimit, AppState.inTutorZone.value, avgTutorSpeed, remainingDistance, remainingDuration, showStopButton, { showStopButton = true }, { resetNavigation(); showStopButton = true })
-                            } else if (route != null) {
-                                OverviewCard(route!!, place, onStart = {
-                                    navigating = true; isSearchExpanded = false; followUser = true; showStopButton = true
-                                    AppState.activeSafetyDevices.value = AppState.safetyDevices.value.filter { distanceToPolyline(it.lat, it.lon, route!!.points) < 100.0 }
-                                }, onReset = { resetNavigation() })
-                            } else if (isSearchExpanded) {
-                                SearchExpandedCard(query, { query = it }, granted, { ask.launch(Manifest.permission.ACCESS_FINE_LOCATION) }, busy, error, searchResults, searchHistory, avoidTolls, { avoidTolls = it }, avoidHighways, { avoidHighways = it }, themeMode, { AppState.themeMode.value = it },
-                                    onSearch = { scope.launch { busy = true; error = null; try { searchResults = searchPlaces(query) } catch (e: Exception) { error = e.message } finally { busy = false } } },
-                                    onPlaceSelected = { p -> scope.launch { 
-                                        busy = true; error = null; searchResults = emptyList(); place = p
-                                        val newHistory = (listOf(p) + searchHistory).distinctBy { it.name }.take(5)
-                                        searchHistory = newHistory; saveHistory(context, newHistory)
-                                        try { 
-                                            route = fetchRoute(effectiveGps ?: error("Attendi il segnale GPS prima di calcolare"), p, avoidTolls, avoidHighways)
-                                            isSearchExpanded = false
-                                        } catch (e: Exception) { 
-                                            error = e.message 
-                                        } finally { 
-                                            busy = false 
-                                        } 
-                                    } },
-                                    onClose = { isSearchExpanded = false }
-                                )
-                            } else { HomeBottomBar(onClick = { isSearchExpanded = true }) }
+                        }
+                    }
+                    Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.End) {
+                        if (navigating) {
+                            EtaCard(gps?.speed?.toInt() ?: 0, speedLimit, inTutor, tutorAvg.toDouble(),
+                                AppState.route.value?.duration ?: 0.0, AppState.route.value?.distance ?: 0.0,
+                                onStop = { stopNavigation(context, scope) })
+                        } else if (AppState.route.value != null) {
+                            OverviewCard(AppState.route.value!!, AppState.place.value,
+                                onStart = { startNavigation(context, scope) },
+                                onReset = { resetNavigation() })
+                        } else if (AppState.isSearchExpanded.value) {
+                            SearchExpandedCard(
+                                onClose = { AppState.isSearchExpanded.value = false }
+                            )
+                        } else {
+                            HomeBottomBar { AppState.isSearchExpanded.value = true }
                         }
                     }
                 } else {
-                    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
+                    Column(Modifier.fillMaxSize()) {
                         Column {
-                            if (!navigating) { TopStatusBar(effectiveGps); Spacer(Modifier.height(10.dp)) }
-                            if (navigating && route != null) ManeuverCard(currentStep, distanceToStep, muted, onMuteToggle = { muted = !muted })
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            if (navigating && !followUser) {
-                                Button(onClick = { followUser = true }, shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue, contentColor = Color.White), modifier = Modifier.padding(bottom = 16.dp).shadow(8.dp)) {
-                                    Text("📍 RICENTRA", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            if (!navigating) {
+                                TopStatusBar(gps)
+                                Spacer(Modifier.height(8.dp))
+                            }
+                            if (navigating && currentStep != null) {
+                                ManeuverCard(currentStep, distanceToStep, muted) {
+                                    NavState.muted.value = !NavState.muted.value
+                                    AppState.muted.value = NavState.muted.value
                                 }
                             }
-                            if (navigating && route != null) {
-                                EtaCard(speed, speedLimit, AppState.inTutorZone.value, avgTutorSpeed, remainingDistance, remainingDuration, showStopButton, { showStopButton = true }, { resetNavigation(); showStopButton = true })
-                            } else if (route != null) {
-                                OverviewCard(route!!, place, onStart = {
-                                    navigating = true; isSearchExpanded = false; followUser = true; showStopButton = true
-                                    AppState.activeSafetyDevices.value = AppState.safetyDevices.value.filter { distanceToPolyline(it.lat, it.lon, route!!.points) < 100.0 }
-                                }, onReset = { resetNavigation() })
-                            } else if (isSearchExpanded) {
-                                SearchExpandedCard(query, { query = it }, granted, { ask.launch(Manifest.permission.ACCESS_FINE_LOCATION) }, busy, error, searchResults, searchHistory, avoidTolls, { avoidTolls = it }, avoidHighways, { avoidHighways = it }, themeMode, { AppState.themeMode.value = it },
-                                    onSearch = { scope.launch { busy = true; error = null; try { searchResults = searchPlaces(query) } catch (e: Exception) { error = e.message } finally { busy = false } } },
-                                    onPlaceSelected = { p -> scope.launch { 
-                                        busy = true; error = null; searchResults = emptyList(); place = p
-                                        val newHistory = (listOf(p) + searchHistory).distinctBy { it.name }.take(5)
-                                        searchHistory = newHistory; saveHistory(context, newHistory)
-                                        try { 
-                                            route = fetchRoute(effectiveGps ?: error("Attendi il segnale GPS prima di calcolare"), p, avoidTolls, avoidHighways) 
-                                            isSearchExpanded = false 
-                                        } catch (e: Exception) { 
-                                            error = e.message 
-                                        } finally { 
-                                            busy = false 
-                                        } 
-                                    } },
-                                    onClose = { isSearchExpanded = false }
+                        }
+                        Spacer(Modifier.weight(1f))
+                        Column(horizontalAlignment = Alignment.End, modifier = Modifier.fillMaxWidth()) {
+                            if (navigating) {
+                                EtaCard(gps?.speed?.toInt() ?: 0, speedLimit, inTutor, tutorAvg.toDouble(),
+                                    AppState.route.value?.duration ?: 0.0, AppState.route.value?.distance ?: 0.0,
+                                    onStop = { stopNavigation(context, scope) })
+                            } else if (AppState.route.value != null) {
+                                OverviewCard(AppState.route.value!!, AppState.place.value,
+                                    onStart = { startNavigation(context, scope) },
+                                    onReset = { resetNavigation() })
+                            } else if (AppState.isSearchExpanded.value) {
+                                SearchExpandedCard(
+                                    onClose = { AppState.isSearchExpanded.value = false }
                                 )
-                            } else { HomeBottomBar(onClick = { isSearchExpanded = true }) }
+                            } else {
+                                HomeBottomBar { AppState.isSearchExpanded.value = true }
+                            }
                         }
                     }
                 }
             }
         }
     }
+}
+
+// ---- Navigazione start/stop ----
+private fun startNavigation(context: Context, scope: kotlinx.coroutines.CoroutineScope) {
+    val route = AppState.route.value ?: return
+    val place = AppState.place.value ?: return
+    NavState.steps = route.steps
+    NavState.routePoints = route.points
+    NavState.activeDevices = AppState.safetyDevices.value
+    NavState.alertedIds.clear()
+    NavState.currentStepIdx.value = 0
+    NavState.navigating.value = true
+    NavState.destLat = place.lat
+    NavState.destLon = place.lon
+    NavState.avoidTolls = AppState.avoidTolls.value
+    NavState.avoidHighways = AppState.avoidHighways.value
+    AppState.navigating.value = true
+    AppState.followUser.value = true
+    AppState.isSearchExpanded.value = false
+    val i = Intent(context, NavigationService::class.java)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(i)
+    else context.startService(i)
+}
+
+private fun stopNavigation(context: Context, scope: kotlinx.coroutines.CoroutineScope) {
+    NavState.navigating.value = false
+    AppState.navigating.value = false
+    val i = Intent(context, NavigationService::class.java).apply { action = "STOP" }
+    context.startService(i)
+    resetNavigation()
 }
 
 private fun resetNavigation() {
-    AppState.navigating.value = false; AppState.stepIndex.intValue = 0; AppState.alertedDevices.clear()
-    AppState.activeSafetyDevices.value = emptyList(); AppState.speedLimit.value = null; AppState.inTutorZone.value = false
-    AppState.followUser.value = true; AppState.route.value = null; AppState.place.value = null 
+    AppState.navigating.value = false
+    AppState.route.value = null
+    AppState.place.value = null
+    AppState.followUser.value = true
+    AppState.isSearchExpanded.value = false
+    NavState.navigating.value = false
+    NavState.steps = emptyList()
+    NavState.routePoints = emptyList()
+    NavState.speedLimit.value = null
+    NavState.isInTutor.value = false
+    NavState.currentStepIdx.value = 0
 }
 
-private fun saveHistory(context: Context, history: List<Place>) {
+// ---- Persistenza cronologia ----
+private fun saveHistory(context: Context, list: List<Place>) {
     val prefs = context.getSharedPreferences("StradaSafePrefs", Context.MODE_PRIVATE)
-    val jsonArray = JSONArray()
-    history.forEach { jsonArray.put(JSONObject().apply { put("name", it.name); put("lat", it.lat); put("lon", it.lon) }) }
-    prefs.edit().putString("search_history", jsonArray.toString()).apply()
+    val arr = JSONArray()
+    list.forEach { arr.put(JSONObject().apply { put("name", it.name); put("lat", it.lat); put("lon", it.lon) }) }
+    prefs.edit().putString("search_history", arr.toString()).apply()
 }
 
 private fun loadHistory(context: Context): List<Place> {
     val prefs = context.getSharedPreferences("StradaSafePrefs", Context.MODE_PRIVATE)
-    val historyStr = prefs.getString("search_history", "[]") ?: "[]"
-    val list = mutableListOf<Place>()
-    try {
-        val arr = JSONArray(historyStr)
-        for (i in 0 until arr.length()) {
-            val obj = arr.getJSONObject(i)
-            list.add(Place(obj.getString("name"), obj.getDouble("lat"), obj.getDouble("lon")))
-        }
-    } catch(e: Exception){}
-    return list
-}
-
-private suspend fun fetchSpeedLimit(lat: Double, lon: Double): Int? = withContext(Dispatchers.IO) {
-    try {
-        val query = "[out:json][timeout:3];way(around:20,$lat,$lon)[\"maxspeed\"];out tags;"
-        val e = URLEncoder.encode(query, "UTF-8")
-        val c = (URL("https://overpass-api.de/api/interpreter?data=$e").openConnection() as HttpURLConnection).apply {
-            connectTimeout = 3000; readTimeout = 3000; requestMethod = "GET"; setRequestProperty("User-Agent", "StradaSafeLiguria/1.1")
-        }
-        val res = c.inputStream.bufferedReader().use { it.readText() }
-        val els = JSONObject(res).optJSONArray("elements") ?: return@withContext null
-        for (i in 0 until els.length()) {
-            val ms = els.getJSONObject(i).optJSONObject("tags")?.optString("maxspeed")
-            if (!ms.isNullOrEmpty()) {
-                return@withContext when (ms) { "IT:urban" -> 50; "IT:rural" -> 90; "IT:motorway" -> 130; "IT:extra_urban" -> 110; else -> ms.filter { it.isDigit() }.toIntOrNull() }
-            }
-        }
-    } catch (_: Exception) {}
-    null
-}
-
-private fun loadSafetyDevices(context: Context): List<SafetyDevice> {
+    val s = prefs.getString("search_history", "[]") ?: "[]"
     return try {
-        val jsonString = context.assets.open("safety_devices.demo.json").bufferedReader().use { it.readText() }
-        val list = mutableListOf<SafetyDevice>()
-        try {
-            val root = JSONObject(jsonString)
-            if (root.has("devices")) {
-                val devices = root.getJSONArray("devices")
-                for (i in 0 until devices.length()) {
-                    val obj = devices.getJSONObject(i)
-                    val lat = obj.optDouble("lat", Double.NaN)
-                    val lon = obj.optDouble("lon", Double.NaN)
-                    val type = obj.optString("type", obj.optString("id", "Segnalazione"))
-                    if (!lat.isNaN() && !lon.isNaN()) list.add(SafetyDevice(lat, lon, type))
-                }
-                return list
-            }
-        } catch (_: Exception) {}
-        emptyList()
-    } catch (e: Exception) { emptyList() }
+        val a = JSONArray(s)
+        (0 until a.length()).map {
+            val o = a.getJSONObject(it)
+            Place(o.getString("name"), o.getDouble("lat"), o.getDouble("lon"))
+        }
+    } catch (_: Exception) { emptyList() }
 }
+
+// ---- Caricamento safety devices ----
+private fun loadSafetyDevices(context: Context): List<SafetyDevice> = try {
+    val json = context.assets.open("safety_devices.demo.json").bufferedReader().use { it.readText() }
+    val root = JSONObject(json)
+    val arr = root.getJSONArray("devices")
+    (0 until arr.length()).mapNotNull {
+        val o = arr.getJSONObject(it)
+        val lat = o.optDouble("lat", Double.NaN)
+        val lon = o.optDouble("lon", Double.NaN)
+        if (lat.isNaN() || lon.isNaN()) null
+        else SafetyDevice(
+            id = o.optString("id", "dev_$it"),
+            lat = lat, lon = lon,
+            type = o.optString("type", "Autovelox"),
+            speedLimit = if (o.has("speed_limit")) o.optInt("speed_limit") else null
+        )
+    }
+} catch (_: Exception) { emptyList() }
+
+// ---- Nominatim search ----
+private suspend fun searchPlaces(q: String): List<Place> = withContext(Dispatchers.IO) {
+    val enc = URLEncoder.encode(q, "UTF-8")
+    val url = "$SEARCH_BASE/search?q=$enc&format=jsonv2&limit=8&countrycodes=it&accept-language=it"
+    val c = (URL(url).openConnection() as HttpURLConnection).apply {
+        connectTimeout = 15000; readTimeout = 20000; requestMethod = "GET"
+        setRequestProperty("User-Agent", "StradaSafe/1.1 (contact: dev@stradasafe.it)")
+    }
+    val res = c.inputStream.bufferedReader().use { it.readText() }
+    val a = JSONArray(res)
+    (0 until a.length()).map {
+        val o = a.getJSONObject(it)
+        Place(o.getString("display_name"), o.getDouble("lat"), o.getDouble("lon"))
+    }
+}
+
+// ---- ORS route ----
+private suspend fun fetchRoute(
+    from: Location, to: Place,
+    avoidTolls: Boolean, avoidHighways: Boolean,
+    currentBearing: Double? = null
+): RouteData = withContext(Dispatchers.IO) {
+    val key = BuildConfig.ORS_API_KEY
+    if (key.isEmpty()) error("Manca ORS_API_KEY in local.properties")
+    val urlStr = "https://api.openrouteservice.org/v2/directions/driving-car/geojson"
+    val body = JSONObject().apply {
+        put("coordinates", JSONArray().apply {
+            put(JSONArray().apply { put(from.longitude); put(from.latitude) })
+            put(JSONArray().apply { put(to.lon); put(to.lat) })
+        })
+        put("language", "it")
+        put("instructions", true)
+        if (currentBearing != null) {
+            put("bearings", JSONArray().apply {
+                put(JSONArray().apply { put(currentBearing.toInt()); put(30) })
+                put(JSONArray().apply { put(JSONObject.NULL) })
+            })
+        }
+        val avoids = JSONArray()
+        if (avoidTolls) avoids.put("tollways")
+        if (avoidHighways) avoids.put("highways")
+        if (avoids.length() > 0) put("options", JSONObject().apply { put("avoid_features", avoids) })
+    }
+    val c = (URL(urlStr).openConnection() as HttpURLConnection).apply {
+        connectTimeout = 15000; readTimeout = 20000; requestMethod = "POST"
+        setRequestProperty("Authorization", key)
+        setRequestProperty("Content-Type", "application/json")
+        doOutput = true
+    }
+    c.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+    if (c.responseCode !in 200..299) {
+        val err = c.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP ${c.responseCode}"
+        error("Errore routing: $err")
+    }
+    val res = c.inputStream.bufferedReader().use { it.readText() }
+    val root = JSONObject(res)
+    if (root.has("error")) error(root.getJSONObject("error").optString("message", "Errore ORS"))
+    val feature = root.getJSONArray("features").getJSONObject(0)
+    val coords = feature.getJSONObject("geometry").getJSONArray("coordinates")
+    val pts = (0 until coords.length()).map {
+        val a = coords.getJSONArray(it)
+        Point.fromLngLat(a.getDouble(0), a.getDouble(1))
+    }
+    val props = feature.getJSONObject("properties")
+    val summary = props.getJSONObject("summary")
+    val segments = props.getJSONArray("segments")
+    val steps = mutableListOf<Step>()
+    for (i in 0 until segments.length()) {
+        val segSteps = segments.getJSONObject(i).getJSONArray("steps")
+        for (j in 0 until segSteps.length()) {
+            val s = segSteps.getJSONObject(j)
+            val wpIdx = s.getJSONArray("way_points").getInt(0)
+            val pt = pts.getOrNull(wpIdx) ?: pts.first()
+            steps += Step(
+                text = s.optString("instruction", "Prosegui"),
+                lat = pt.latitude(), lon = pt.longitude(),
+                distance = s.optDouble("distance", 0.0)
+            )
+        }
+    }
+    RouteData(pts, summary.getDouble("distance"), summary.getDouble("duration"), steps)
+}
+
+// ---- UI components ----
 
 @Composable
 private fun TopStatusBar(gps: Location?) {
-    Surface(color = MaterialTheme.colorScheme.surface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(8.dp, RectangleShape)) {
-        Row(Modifier.fillMaxWidth().padding(10.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+    Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 4.dp, shape = MaterialTheme.shapes.medium) {
+        Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically) {
             Column {
-                Text("STRADASAFE 1.1", color = MaterialTheme.colorScheme.onBackground, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                Text(if (gps != null) "GPS Attivo (${gps.accuracy.roundToInt()}m)" else "Ricerca segnale GPS...", color = if (gps != null) WazeGreen else AlertAmber, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                Text("STRADASAFE 1.1", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text(
+                    if (gps != null) "GPS Attivo (${gps.accuracy.roundToInt()}m)" else "GPS in attesa...",
+                    fontSize = 11.sp, color = TextGray
+                )
             }
         }
     }
@@ -666,65 +467,148 @@ private fun TopStatusBar(gps: Location?) {
 
 @Composable
 private fun HomeBottomBar(onClick: () -> Unit) {
-    Surface(color = MaterialTheme.colorScheme.surface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(8.dp, RectangleShape).clickable { onClick() }) {
-        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("🔍", fontSize = 18.sp); Spacer(Modifier.width(12.dp)); Text("Cerca destinazione in Liguria...", color = TextGray, fontSize = 14.sp)
+    Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 6.dp,
+        shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth().clickable { onClick() }) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("🔍", fontSize = 18.sp)
+            Spacer(Modifier.width(10.dp))
+            Text("Cerca una destinazione", fontSize = 15.sp)
         }
     }
 }
 
 @Composable
-private fun SearchExpandedCard(
-    query: String, onQuery: (String) -> Unit, granted: Boolean, onGps: () -> Unit,
-    busy: Boolean, error: String?, results: List<Place>, history: List<Place>,
-    avoidTolls: Boolean, onTollsChange: (Boolean) -> Unit, avoidHighways: Boolean, onHighwaysChange: (Boolean) -> Unit,
-    themeMode: ThemeMode, onThemeToggle: (ThemeMode) -> Unit,
-    onSearch: () -> Unit, onPlaceSelected: (Place) -> Unit, onClose: () -> Unit
-) {
-    Surface(color = MaterialTheme.colorScheme.surface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(16.dp, RectangleShape)) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Cerca Luogo", color = MaterialTheme.colorScheme.onBackground, fontSize = 18.sp, fontWeight = FontWeight.Bold); TextButton(onClick = onClose) { Text("CHIUDI", color = AppleBlue, fontSize = 13.sp) }
+private fun SearchExpandedCard(onClose: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val query by AppState.query
+    val results by AppState.searchResults
+    val history by AppState.searchHistory
+    val busy by AppState.busy
+    val error by AppState.error
+    val granted by AppState.granted
+    val avoidTolls by AppState.avoidTolls
+    val avoidHighways by AppState.avoidHighways
+    val themeMode by AppState.themeMode
+
+    Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 8.dp,
+        shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Cerca destinazione", fontWeight = FontWeight.Bold)
+                TextButton(onClick = onClose) { Text("Chiudi") }
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { onTollsChange(!avoidTolls) }) {
-                        Checkbox(checked = avoidTolls, onCheckedChange = onTollsChange, colors = CheckboxDefaults.colors(checkedColor = AppleBlue, uncheckedColor = TextGray)); Text("No Pedaggi", color = MaterialTheme.colorScheme.onBackground, fontSize = 12.sp)
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { onHighwaysChange(!avoidHighways) }) {
-                        Checkbox(checked = avoidHighways, onCheckedChange = onHighwaysChange, colors = CheckboxDefaults.colors(checkedColor = AppleBlue, uncheckedColor = TextGray)); Text("No Autostrade", color = MaterialTheme.colorScheme.onBackground, fontSize = 12.sp)
-                    }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = avoidTolls, onCheckedChange = { AppState.avoidTolls.value = it })
+                    Text("Evita pedaggi", fontSize = 12.sp)
                 }
-                
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { 
-                    onThemeToggle(
-                        when (themeMode) {
-                            ThemeMode.AUTO -> ThemeMode.DARK
-                            ThemeMode.DARK -> ThemeMode.LIGHT
-                            ThemeMode.LIGHT -> ThemeMode.AUTO
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = avoidHighways, onCheckedChange = { AppState.avoidHighways.value = it })
+                    Text("Evita autostrade", fontSize = 12.sp)
+                }
+                TextButton(onClick = {
+                    AppState.themeMode.value = when (themeMode) {
+                        ThemeMode.AUTO -> ThemeMode.DARK
+                        ThemeMode.DARK -> ThemeMode.LIGHT
+                        ThemeMode.LIGHT -> ThemeMode.AUTO
+                    }
+                }) { Text(themeMode.label, fontSize = 12.sp) }
+            }
+            OutlinedTextField(
+                value = query,
+                onValueChange = { AppState.query.value = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Es. Genova, Via Roma 10") },
+                singleLine = true
+            )
+            if (!granted) {
+                Button(onClick = {
+                    // richiedi permesso
+                }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Attiva GPS")
+                }
+            }
+            Button(
+                onClick = {
+                    scope.launch {
+                        AppState.busy.value = true
+                        AppState.error.value = null
+                        try {
+                            AppState.searchResults.value = searchPlaces(query)
+                            if (AppState.searchResults.value.isEmpty()) AppState.error.value = "Nessun risultato"
+                        } catch (e: Exception) {
+                            AppState.error.value = e.message
+                        } finally {
+                            AppState.busy.value = false
                         }
-                    ) 
-                }) {
-                    Text(themeMode.label, color = MaterialTheme.colorScheme.onBackground, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
+                    }
+                },
+                enabled = query.length > 2 && !busy,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                else Text("Cerca")
             }
-            OutlinedTextField(value = query, onValueChange = onQuery, modifier = Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("Indirizzo o luogo...", color = TextGray, fontSize = 13.sp) }, shape = RectangleShape, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = AppleBlue, unfocusedBorderColor = TextGray, focusedTextColor = MaterialTheme.colorScheme.onBackground, unfocusedTextColor = MaterialTheme.colorScheme.onBackground))
-            if (!granted) Button(onClick = onGps, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue)) { Text("ATTIVA PERMESSO GPS", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
-            Button(onClick = onSearch, enabled = query.length > 2 && granted && !busy, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue)) { Text(if (busy) "CERCANDO..." else "CERCA", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
             error?.let { Text(it, color = AlertRed, fontSize = 12.sp) }
             if (results.isNotEmpty()) {
-                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 200.dp)) {
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 220.dp)) {
                     items(results) { res ->
-                        TextButton(onClick = { onPlaceSelected(res) }, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, contentPadding = PaddingValues(10.dp)) { Text(res.name, color = MaterialTheme.colorScheme.onBackground, maxLines = 2, fontSize = 13.sp, textAlign = TextAlign.Start, modifier = Modifier.fillMaxWidth()) }
+                        TextButton(onClick = {
+                            scope.launch {
+                                AppState.busy.value = true
+                                AppState.error.value = null
+                                try {
+                                    val gps = LocationBus.current()
+                                    if (gps == null) error("GPS non disponibile")
+                                    val newHistory = (listOf(res) + history).distinctBy { it.name }.take(10)
+                                    AppState.searchHistory.value = newHistory
+                                    saveHistory(context, newHistory)
+                                    val route = fetchRoute(
+                                        gps!!, res,
+                                        AppState.avoidTolls.value,
+                                        AppState.avoidHighways.value,
+                                        if (gps.hasBearing()) gps.bearing.toDouble() else null
+                                    )
+                                    AppState.route.value = route
+                                    AppState.place.value = res
+                                    AppState.isSearchExpanded.value = false
+                                } catch (e: Exception) {
+                                    AppState.error.value = e.message
+                                } finally {
+                                    AppState.busy.value = false
+                                }
+                            }
+                        }, modifier = Modifier.fillMaxWidth()) {
+                            Text(res.name, fontSize = 13.sp, maxLines = 2)
+                        }
                         HorizontalDivider(color = TextGray.copy(alpha = 0.3f))
                     }
                 }
             } else if (query.isEmpty() && history.isNotEmpty()) {
-                Text("CRONOLOGIA RECENTE", color = TextGray, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp))
-                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 200.dp)) {
+                Text("CRONOLOGIA RECENTE", color = TextGray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 220.dp)) {
                     items(history) { res ->
-                        TextButton(onClick = { onPlaceSelected(res) }, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, contentPadding = PaddingValues(10.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) { Text("🕒", fontSize = 14.sp, modifier = Modifier.padding(end = 10.dp)); Text(res.name, color = MaterialTheme.colorScheme.onBackground, maxLines = 2, fontSize = 13.sp, textAlign = TextAlign.Start, modifier = Modifier.fillMaxWidth()) }
+                        TextButton(onClick = {
+                            scope.launch {
+                                AppState.busy.value = true
+                                try {
+                                    val gps = LocationBus.current()
+                                    if (gps != null) {
+                                        val route = fetchRoute(gps, res,
+                                            AppState.avoidTolls.value,
+                                            AppState.avoidHighways.value,
+                                            if (gps.hasBearing()) gps.bearing.toDouble() else null)
+                                        AppState.route.value = route
+                                        AppState.place.value = res
+                                        AppState.isSearchExpanded.value = false
+                                    }
+                                } catch (e: Exception) {
+                                    AppState.error.value = e.message
+                                } finally { AppState.busy.value = false }
+                            }
+                        }, modifier = Modifier.fillMaxWidth()) {
+                            Text(res.name, fontSize = 13.sp, maxLines = 1)
                         }
                         HorizontalDivider(color = TextGray.copy(alpha = 0.3f))
                     }
@@ -736,297 +620,221 @@ private fun SearchExpandedCard(
 
 @Composable
 private fun OverviewCard(route: RouteData, place: Place?, onStart: () -> Unit, onReset: () -> Unit) {
-    Surface(color = MaterialTheme.colorScheme.surface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(16.dp, RectangleShape)) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(place?.name ?: "Destinazione", color = MaterialTheme.colorScheme.onBackground, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 2)
+    Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 8.dp, shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(place?.name ?: "Destinazione", fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column { Text("Distanza", color = TextGray, fontSize = 11.sp); Text("%.1f km".format(route.distance / 1000), color = WazeCyan, fontWeight = FontWeight.Bold, fontSize = 18.sp) }
-                Column(horizontalAlignment = Alignment.End) { Text("Tempo stimato", color = TextGray, fontSize = 11.sp); Text("${(route.duration / 60).roundToInt()} min", color = WazeGreen, fontWeight = FontWeight.Bold, fontSize = 18.sp) }
+                Column {
+                    Text("Distanza", color = TextGray, fontSize = 11.sp)
+                    Text("${(route.distance / 1000).let { "%.1f".format(it) }} km", fontWeight = FontWeight.Bold)
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("Tempo stimato", color = TextGray, fontSize = 11.sp)
+                    Text("${(route.duration / 60).roundToInt()} min", fontWeight = FontWeight.Bold)
+                }
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = onReset, Modifier.weight(1f), shape = RectangleShape, colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onBackground)) { Text("ANNULLA", fontSize = 13.sp) }
-                Button(onClick = onStart, Modifier.weight(1f), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue)) { Text("AVVIA GUIDA", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onReset, modifier = Modifier.weight(1f)) { Text("Annulla") }
+                Button(onClick = onStart, modifier = Modifier.weight(1f)) { Text("AVVIA") }
             }
         }
     }
 }
 
 @Composable
-private fun ManeuverCard(step: Step?, distanceToStep: Double, muted: Boolean, onMuteToggle: () -> Unit) {
-    Surface(color = MaterialTheme.colorScheme.surface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(12.dp, RectangleShape)) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(10.dp)) {
-            Surface(shape = RectangleShape, color = AppleBlue, modifier = Modifier.size(54.dp)) { Box(contentAlignment = Alignment.Center) { Text(getOrsManeuverSymbol(step?.maneuver?.toIntOrNull()), fontSize = 30.sp, color = Color.White) } }
+private fun ManeuverCard(step: Step, distanceToStep: Double, muted: Boolean, onMuteToggle: () -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 8.dp, shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(12.dp)) {
+            Surface(shape = MaterialTheme.shapes.small, color = AppleBlue,
+                modifier = Modifier.size(48.dp)) {
+                Box(contentAlignment = Alignment.Center) { Text("➤", color = Color.White, fontSize = 22.sp) }
+            }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(if (distanceToStep.isNaN()) "..." else "${distanceToStep.roundToInt()} m", color = MaterialTheme.colorScheme.onBackground, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
-                Text(step?.text ?: "Prosegui", color = WazeCyan, fontSize = 14.sp, maxLines = 2, fontWeight = FontWeight.Medium)
+                Text(
+                    if (distanceToStep.isNaN()) "..." else "${distanceToStep.roundToInt()} m",
+                    fontWeight = FontWeight.Bold, color = WazeCyan, fontSize = 14.sp
+                )
+                Text(step.text, fontSize = 14.sp, maxLines = 2)
             }
-            IconButton(onClick = onMuteToggle, modifier = Modifier.size(40.dp)) { Text(if (muted) "🔇" else "🔊", fontSize = 20.sp) }
+            TextButton(onClick = onMuteToggle) {
+                Text(if (muted) "🔇" else "🔊", fontSize = 20.sp)
+            }
         }
     }
 }
 
 @Composable
-private fun EtaCard(speed: Int, speedLimit: Int?, inTutorZone: Boolean, avgTutorSpeed: Int, remainingDistance: Double, remainingDuration: Double, showStopButton: Boolean, onCardClick: () -> Unit, onStop: () -> Unit) {
-    val etaMillis = System.currentTimeMillis() + (remainingDuration * 1000).toLong()
-    val etaString = if (remainingDuration > 0) java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(java.util.Date(etaMillis)) else "--:--"
-    val speedColor = if (speedLimit != null && speed > speedLimit) AlertRed else MaterialTheme.colorScheme.onBackground
-
-    Surface(color = MaterialTheme.colorScheme.surface, shape = RectangleShape, modifier = Modifier.fillMaxWidth().shadow(16.dp, RectangleShape).clickable { onCardClick() }) {
-        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    MetricDashboard("$speed", "KM/H", speedColor)
-                    if (speedLimit != null) {
-                        Surface(shape = RectangleShape, color = MaterialTheme.colorScheme.onBackground, border = BorderStroke(2.dp, AlertRed), modifier = Modifier.size(32.dp)) { Box(contentAlignment = Alignment.Center) { Text("$speedLimit", color = MaterialTheme.colorScheme.background, fontWeight = FontWeight.Bold, fontSize = 13.sp) } }
-                    }
-                    if (inTutorZone) {
-                        val avgColor = if (speedLimit != null && avgTutorSpeed > speedLimit) AlertRed else AlertAmber
-                        Surface(shape = RectangleShape, color = Color(0x33FF9F0A), modifier = Modifier.padding(start = 6.dp)) { MetricDashboard("$avgTutorSpeed", "MEDIA", avgColor, modifier = Modifier.padding(horizontal = 6.dp)) }
-                    }
+private fun EtaCard(speed: Int, speedLimit: Int?, inTutorZone: Boolean, avgTutorSpeed: Double,
+                    remainingDuration: Double, remainingDistance: Double, onStop: () -> Unit) {
+    val speedColor = if (speedLimit != null && speed > speedLimit) AlertRed else WazeGreen
+    Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 8.dp, shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                MetricDashboard("$speed", "KM/H", speedColor)
+                if (speedLimit != null) MetricDashboard("$speedLimit", "LIMITE", AlertAmber)
+                if (inTutorZone) {
+                    val tColor = if (speedLimit != null && avgTutorSpeed > speedLimit) AlertRed else WazeGreen
+                    MetricDashboard("%.0f".format(avgTutorSpeed), "MEDIA TUTOR", tColor)
                 }
                 MetricDashboard("%.1f".format(remainingDistance / 1000), "KM", MaterialTheme.colorScheme.onBackground)
-                MetricDashboard(etaString, "ARRIVO", WazeGreen)
+                MetricDashboard("${(remainingDuration / 60).roundToInt()}", "MIN", MaterialTheme.colorScheme.onBackground)
             }
-            if (showStopButton) {
-                Button(onClick = onStop, modifier = Modifier.fillMaxWidth(), shape = RectangleShape, colors = ButtonDefaults.buttonColors(containerColor = AlertRed)) { Text("TERMINA VIAGGIO", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+            Button(onClick = onStop, modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = AlertRed)) {
+                Text("TERMINA NAVIGAZIONE")
             }
         }
     }
 }
 
 @Composable
-private fun MetricDashboard(value: String, unit: String, color: Color, modifier: Modifier = Modifier) = Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-    Text(value, color = color, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold); Text(unit, color = TextGray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+private fun MetricDashboard(value: String, unit: String, color: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = color)
+        Text(unit, fontSize = 10.sp, color = TextGray)
+    }
 }
 
-private fun getOrsManeuverSymbol(type: Int?): String = when (type) { 0, 2, 4, 12 -> "↰"; 1, 3, 5, 13 -> "↱"; 9 -> "⮌"; 7, 8, 26, 27 -> "⟳"; else -> "↑" }
-
+// ---- Mappa ----
 @Composable
-private fun NavMap(location: Location?, place: Place?, route: RouteData?, navigating: Boolean, followUser: Boolean, speed: Int, mapStyleUrl: String) {
-    val context = LocalContext.current
-    val density = LocalDensity.current
-    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-    val mapView = remember { MapView(context) }
-    var ready by remember { mutableStateOf(false) }
-    var fitted by remember { mutableStateOf(false) }
-    var loadedStyle by remember { mutableStateOf("") }
-    
-    var lastLat by remember { mutableDoubleStateOf(Double.NaN) }
-    var lastLon by remember { mutableDoubleStateOf(Double.NaN) }
-    var lastBearing by remember { mutableDoubleStateOf(0.0) }
-
-    val paddingLeft = if (isLandscape && navigating) with(density) { 360.dp.toPx().toInt() } else 0
-    val paddingTop = if (!isLandscape && navigating) with(density) { 100.dp.toPx().toInt() } else 0
-    val paddingBottom = if (!isLandscape && navigating) with(density) { 140.dp.toPx().toInt() } else 0
-
+private fun NavMap(
+    gps: Location?, place: Place?, route: RouteData?,
+    navigating: Boolean, followUser: Boolean, speedLimit: Int?
+) {
     AndroidView(
-        factory = {
-            mapView.apply {
-                onCreate(null)
-            }
-        },
-        update = { v ->
-            if (loadedStyle != mapStyleUrl) {
-                ready = false
-                v.getMapAsync { m ->
-                    m.setStyle(Style.Builder().fromUri(mapStyleUrl)) { s ->
-                        s.addSource(GeoJsonSource("route"))
-                        s.addLayer(LineLayer("route-l", "route").withProperties(lineColor("#64D2FF"), lineWidth(8f)))
-                        s.addSource(GeoJsonSource("dest"))
-                        s.addLayer(CircleLayer("dest-l", "dest").withProperties(circleRadius(9f), circleColor("#32D74B")))
-                        s.addSource(GeoJsonSource("safety"))
-                        s.addLayer(CircleLayer("safety-l", "safety").withProperties(circleRadius(7f), circleColor("#FF453A"), circleStrokeColor("#FFFFFF"), circleStrokeWidth(2f)))
-                        
-                        loadedStyle = mapStyleUrl
-                        ready = true
-                    }
-                }
-            }
+        modifier = Modifier.fillMaxSize(),
+        factory = { ctx ->
+            MapView(ctx).apply {
+                getMapAsync { map ->
+                    map.setStyle(Style.Builder().fromUri(STYLE_URL)) { style ->
+                        // Sorgente posizione utente
+                        val userFeature = FeatureCollection.fromFeatures(emptyList())
+                        style.addSource(GeoJsonSource("user-src", userFeature))
+                        style.addLayer(
+                            CircleLayer("user-layer", "user-src").withProperties(
+                                circleRadius(8f),
+                                circleColor("#0A84FF".toInt()),
+                                circleStrokeWidth(3f),
+                                circleStrokeColor("#FFFFFF".toInt())
+                            )
+                        )
+                        // Sorgente destinazione
+                        style.addSource(GeoJsonSource("dest-src", FeatureCollection.fromFeatures(emptyList())))
+                        style.addLayer(
+                            CircleLayer("dest-layer", "dest-src").withProperties(
+                                circleRadius(10f),
+                                circleColor("#FF453A".toInt()),
+                                circleStrokeWidth(2f),
+                                circleStrokeColor("#FFFFFF".toInt())
+                            )
+                        )
+                        // Sorgente rotta
+                        style.addSource(GeoJsonSource("route-src", FeatureCollection.fromFeatures(emptyList())))
+                        style.addLayer(
+                            LineLayer("route-layer", "route-src").withProperties(
+                                lineColor("#0A84FF".toInt()),
+                                lineWidth(6f),
+                                lineCap("round"),
+                                lineJoin("round")
+                            )
+                        )
+                        // Sorgente safety
+                        style.addSource(GeoJsonSource("safety-src", FeatureCollection.fromFeatures(emptyList())))
+                        style.addLayer(
+                            CircleLayer("safety-layer", "safety-src").withProperties(
+                                circleRadius(7f),
+                                circleColor("#FF9F0A".toInt()),
+                                circleStrokeWidth(2f),
+                                circleStrokeColor("#FFFFFF".toInt())
+                            )
+                        )
 
-            if (ready) v.getMapAsync { m ->
-                m.setPadding(paddingLeft, paddingTop, 0, paddingBottom)
-
-                try {
-                    if (!m.locationComponent.isLocationComponentActivated && ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-                        m.style?.let { style ->
-                            val options = LocationComponentActivationOptions.builder(context, style)
+                        // Location component
+                        val lc = map.locationComponent
+                        lc.activateLocationComponent(
+                            LocationComponentActivationOptions.builder(ctx, style)
                                 .useDefaultLocationEngine(false)
                                 .build()
-                            m.locationComponent.activateLocationComponent(options)
-                            m.locationComponent.isLocationComponentEnabled = true
-                            m.locationComponent.cameraMode = CameraMode.NONE 
-                            m.locationComponent.renderMode = RenderMode.GPS
-                        }
-                    }
-                } catch (e: Exception) {}
+                        )
+                        lc.isLocationComponentEnabled = true
+                        lc.cameraMode = if (followUser) CameraMode.TRACKING else CameraMode.NONE
+                        lc.renderMode = RenderMode.COMPASS
 
-                val snap = if (navigating && route != null && location != null) snapToRoute(location.latitude, location.longitude, route.points) else null
-                val targetLat = snap?.first ?: location?.latitude
-                val targetLon = snap?.second ?: location?.longitude
-
-                if (targetLat != null && targetLon != null) {
-                    val targetBearing = if (!lastLat.isNaN() && distanceMeters(lastLat, lastLon, targetLat, targetLon) > 1.0) {
-                        calculateBearing(lastLat, lastLon, targetLat, targetLon)
-                    } else if (location != null && location.hasBearing() && speed > 5) {
-                        location.bearing.toDouble()
-                    } else {
-                        lastBearing
-                    }
-
-                    lastLat = targetLat
-                    lastLon = targetLon
-                    lastBearing = targetBearing
-
-                    if (m.locationComponent.isLocationComponentActivated) {
-                        val simLoc = Location("nav").apply {
-                            latitude = targetLat
-                            longitude = targetLon
-                            bearing = targetBearing.toFloat()
-                            time = System.currentTimeMillis()
-                            accuracy = location?.accuracy ?: 5f
-                        }
-                        m.locationComponent.forceLocationUpdate(simLoc)
-                    }
-
-                    if (navigating && followUser) {
-                        val targetZoom = when { speed > 90 -> 15.0; speed > 50 -> 16.5; else -> 17.5 }
-                        val targetTilt = if (speed > 80) 60.0 else 45.0
-                        val pos = CameraPosition.Builder().target(LatLng(targetLat, targetLon)).zoom(targetZoom).bearing(targetBearing).tilt(targetTilt).build()
-                        m.animateCamera(CameraUpdateFactory.newCameraPosition(pos), 1000)
+                        // Redraw loop
+                        map.addOnCameraIdleListener { /* niente */ }
                     }
                 }
-                
-                if (place != null) m.style?.getSourceAs<GeoJsonSource>("dest")?.setGeoJson(Feature.fromGeometry(Point.fromLngLat(place.lon, place.lat)))
-                else m.style?.getSourceAs<GeoJsonSource>("dest")?.setGeoJson(FeatureCollection.fromFeatures(emptyArray<Feature>()))
-                
-                if (route != null) {
-                    m.style?.getSourceAs<GeoJsonSource>("route")?.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(route.points)))
-                    if (!navigating && !fitted) {
-                        val b = LatLngBounds.Builder()
-                        route.points.forEach { b.include(LatLng(it.latitude(), it.longitude())) }
-                        m.animateCamera(CameraUpdateFactory.newLatLngBounds(b.build(), 150), 800)
-                        fitted = true
-                    }
-                } else {
-                    m.style?.getSourceAs<GeoJsonSource>("route")?.setGeoJson(FeatureCollection.fromFeatures(emptyArray<Feature>()))
-                    fitted = false
-                }
-
-                val safetyPoints = if (navigating) AppState.activeSafetyDevices.value.map { Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) } else emptyList()
-                m.style?.getSourceAs<GeoJsonSource>("safety")?.setGeoJson(FeatureCollection.fromFeatures(safetyPoints))
+                tag = "stradasafe_map"
             }
         },
-        modifier = Modifier.fillMaxSize()
-    )
+        update = { mapView ->
+            mapView.getMapAsync { map ->
+                val style = map.style ?: return@getMapAsync
+                // Utente
+                if (gps != null) {
+                    style.getSourceAs<GeoJsonSource>("user-src")?.setGeoJson(
+                        Feature.fromGeometry(Point.fromLngLat(gps.longitude, gps.latitude))
+                    )
+                }
+                // Destinazione
+                if (place != null) {
+                    style.getSourceAs<GeoJsonSource>("dest-src")?.setGeoJson(
+                        Feature.fromGeometry(Point.fromLngLat(place.lon, place.lat))
+                    )
+                } else {
+                    style.getSourceAs<GeoJsonSource>("dest-src")?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
+                }
+                // Rotta
+                if (route != null && route.points.size >= 2) {
+                    style.getSourceAs<GeoJsonSource>("route-src")?.setGeoJson(
+                        Feature.fromGeometry(LineString.fromLngLats(route.points))
+                    )
+                } else {
+                    style.getSourceAs<GeoJsonSource>("route-src")?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
+                }
+                // Safety
+                val safeties = if (navigating) AppState.safetyDevices.value else emptyList()
+                val feats = safeties.map {
+                    Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat))
+                }
+                style.getSourceAs<GeoJsonSource>("safety-src")?.setGeoJson(FeatureCollection.fromFeatures(feats))
 
-    DisposableEffect(mapView) {
-        mapView.onStart(); mapView.onResume()
-        onDispose { mapView.onPause(); mapView.onStop(); mapView.onDestroy() }
-    }
-}
-
-private suspend fun searchPlaces(q: String): List<Place> = withContext(Dispatchers.IO) {
-    val e = URLEncoder.encode(q, "UTF-8")
-    val c = (URL("$SEARCH_BASE/search?q=$e&format=jsonv2&limit=5&countrycodes=it&viewbox=7.45,44.75,10.10,43.70&bounded=1").openConnection() as HttpURLConnection).apply {
-        connectTimeout = 15000; readTimeout = 20000; requestMethod = "GET"; setRequestProperty("User-Agent", "StradaSafeLiguria/1.1"); setRequestProperty("Accept-Language", "it")
-    }
-    val res = try { if (c.responseCode !in 200..299) error("Servizio ricerca non disponibile"); c.inputStream.bufferedReader().use { it.readText() } } finally { c.disconnect() }
-    val a = JSONArray(res)
-    if (a.length() == 0) error("Nessun risultato trovato in Liguria.")
-    val list = mutableListOf<Place>()
-    for (i in 0 until a.length()) { val o = a.getJSONObject(i); list.add(Place(o.getString("display_name"), o.getString("lat").toDouble(), o.getString("lon").toDouble())) }
-    list
-}
-
-private suspend fun fetchRoute(l: Location, p: Place, avoidTolls: Boolean, avoidHighways: Boolean, currentBearing: Double? = null): RouteData = withContext(Dispatchers.IO) {
-    val urlStr = "https://api.openrouteservice.org/v2/directions/driving-car/geojson"
-    val jsonBody = JSONObject().apply {
-        put("coordinates", JSONArray().apply { put(JSONArray().apply { put(l.longitude); put(l.latitude) }); put(JSONArray().apply { put(p.lon); put(p.lat) }) })
-        put("language", "it"); put("instructions", true)
-        
-        if (currentBearing != null) {
-            put("bearings", JSONArray().apply {
-                put(JSONArray().apply { put(currentBearing.roundToInt()); put(90) })
-                put(JSONObject.NULL)
-            })
-        }
-
-        val avoids = JSONArray()
-        if (avoidTolls) avoids.put("tollways")
-        if (avoidHighways) avoids.put("highways")
-        if (avoids.length() > 0) put("options", JSONObject().apply { put("avoid_features", avoids) })
-    }
-    val c = (URL(urlStr).openConnection() as HttpURLConnection).apply {
-        connectTimeout = 15000; readTimeout = 20000; requestMethod = "POST"
-        setRequestProperty("Authorization", ORS_API_KEY); setRequestProperty("Content-Type", "application/json; charset=utf-8"); setRequestProperty("Accept", "application/json, application/geo+json; charset=utf-8"); doOutput = true
-    }
-    try {
-        c.outputStream.use { os -> val input = jsonBody.toString().toByteArray(Charsets.UTF_8); os.write(input, 0, input.size) }
-        if (c.responseCode !in 200..299) { if (c.responseCode == 401 || c.responseCode == 403) error("API Key ORS non valida"); error("Nessun percorso alternativo trovato (${c.responseCode})") }
-        val res = c.inputStream.bufferedReader().use { it.readText() }
-        val root = JSONObject(res)
-        if (root.has("error")) error("Errore nel calcolo del percorso")
-        val feature = root.getJSONArray("features").getJSONObject(0)
-        val coords = feature.getJSONObject("geometry").getJSONArray("coordinates")
-        val pts = (0 until coords.length()).map { val a = coords.getJSONArray(it); Point.fromLngLat(a.getDouble(0), a.getDouble(1)) }
-        val steps = mutableListOf<Step>()
-        val props = feature.getJSONObject("properties")
-        val summary = props.getJSONObject("summary")
-        val segments = props.getJSONArray("segments")
-        for (i in 0 until segments.length()) {
-            val segSteps = segments.getJSONObject(i).getJSONArray("steps")
-            for (j in 0 until segSteps.length()) {
-                val s = segSteps.getJSONObject(j)
-                val wpIndex = s.getJSONArray("way_points").getInt(0)
-                val pt = pts[wpIndex]
-                steps += Step(text = s.getString("instruction"), lat = pt.latitude(), lon = pt.longitude(), distance = s.getDouble("distance"), duration = s.getDouble("duration"), maneuver = s.getInt("type").toString())
+                // Camera
+                if (gps != null) {
+                    if (navigating && followUser) {
+                        val zoom = when {
+                            (gps.speed) > 25 -> 15.0
+                            (gps.speed) > 13 -> 16.0
+                            else -> 17.0
+                        }
+                        val tilt = if (gps.speed > 22) 55.0 else 40.0
+                        val pos = CameraPosition.Builder()
+                            .target(LatLng(gps.latitude, gps.longitude))
+                            .zoom(zoom)
+                            .tilt(tilt)
+                            .bearing(gps.bearing.toDouble())
+                            .build()
+                        map.animateCamera(CameraUpdateFactory.newCameraPosition(pos), 800)
+                        // Aggiorna anche la location nativa
+                        if (map.locationComponent.isLocationComponentActivated) {
+                            val sim = Location("nav").apply {
+                                latitude = gps.latitude; longitude = gps.longitude
+                                bearing = gps.bearing; speed = gps.speed
+                                time = gps.time; accuracy = gps.accuracy
+                            }
+                            map.locationComponent.forceLocationUpdate(sim)
+                        }
+                    } else if (route != null) {
+                        val b = LatLngBounds.Builder()
+                        route.points.forEach { b.include(LatLng(it.latitude(), it.longitude())) }
+                        map.animateCamera(CameraUpdateFactory.newLatLngBounds(b.build(), 100))
+                    }
+                }
             }
         }
-        RouteData(pts, summary.getDouble("distance"), summary.getDouble("duration"), steps)
-    } finally { c.disconnect() }
-}
-
-private fun calculateBearing(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-    val phi1 = Math.toRadians(lat1); val phi2 = Math.toRadians(lat2)
-    val deltaLambda = Math.toRadians(lon2 - lon1)
-    val y = sin(deltaLambda) * cos(phi2)
-    val x = cos(phi1) * sin(phi2) - sin(phi1) * cos(phi2) * cos(deltaLambda)
-    return (Math.toDegrees(atan2(y, x)) + 360.0) % 360.0
-}
-
-private fun distanceMeters(a: Double, b: Double, c: Double, d: Double): Double {
-    val r = 6371000.0; val p1 = Math.toRadians(a); val p2 = Math.toRadians(c); val dp = Math.toRadians(c - a); val dl = Math.toRadians(d - b)
-    val x = sin(dp / 2).pow(2) + cos(p1) * cos(p2) * sin(dl / 2).pow(2)
-    return 2 * r * atan2(sqrt(x), sqrt(1 - x))
-}
-
-private fun distanceToPolyline(lat: Double, lon: Double, pts: List<Point>): Double {
-    if (pts.isEmpty()) return Double.MAX_VALUE
-    var minDistance = Double.MAX_VALUE
-    val cosLat = cos(Math.toRadians(lat))
-
-    for (i in 0 until pts.size - 1) {
-        val p1 = pts[i]
-        val p2 = pts[i+1]
-        
-        val x0 = lon * cosLat; val y0 = lat
-        val x1 = p1.longitude() * cosLat; val y1 = p1.latitude()
-        val x2 = p2.longitude() * cosLat; val y2 = p2.latitude()
-
-        val dx = x2 - x1
-        val dy = y2 - y1
-        if (dx == 0.0 && dy == 0.0) continue
-
-        val t = ((x0 - x1) * dx + (y0 - y1) * dy) / (dx * dx + dy * dy)
-        val closestX = when { t < 0 -> x1; t > 1 -> x2; else -> x1 + t * dx }
-        val closestY = when { t < 0 -> y1; t > 1 -> y2; else -> y1 + t * dy }
-
-        val projLon = closestX / cosLat
-        val projLat = closestY
-
-        val d = distanceMeters(lat, lon, projLat, projLon)
-        if (d < minDistance) minDistance = d
-    }
-    return minDistance
+    )
 }
