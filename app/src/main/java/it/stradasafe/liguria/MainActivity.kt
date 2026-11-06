@@ -83,6 +83,103 @@ import kotlin.math.*
 private const val ORS_API_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImZjZDcxY2MyNmJiNjQwYzU4OTIzZDY0ZGE2MDEyMWJiIiwiaCI6Im11cm11cjY0In0="
 private const val SEARCH_BASE = "https://nominatim.openstreetmap.org"
 
+// ==========================================
+// UTILITY GEOGRAFICHE (NAMESPACED)
+// Risolve l'errore di Overload Ambiguity
+// ==========================================
+object GeoUtils {
+    fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val r = 6371000.0
+        val p1 = Math.toRadians(lat1); val p2 = Math.toRadians(lat2)
+        val dp = Math.toRadians(lat2 - lat1); val dl = Math.toRadians(lon2 - lon1)
+        val x = sin(dp / 2).pow(2) + cos(p1) * cos(p2) * sin(dl / 2).pow(2)
+        return 2 * r * atan2(sqrt(x), sqrt(1 - x))
+    }
+
+    fun distanceToPolyline(lat: Double, lon: Double, pts: List<Point>): Double {
+        if (pts.isEmpty()) return Double.MAX_VALUE
+        var minDistance = Double.MAX_VALUE
+        val cosLat = cos(Math.toRadians(lat))
+
+        for (i in 0 until pts.size - 1) {
+            val p1 = pts[i]
+            val p2 = pts[i+1]
+            val x0 = lon * cosLat; val y0 = lat
+            val x1 = p1.longitude() * cosLat; val y1 = p1.latitude()
+            val x2 = p2.longitude() * cosLat; val y2 = p2.latitude()
+            val dx = x2 - x1
+            val dy = y2 - y1
+            if (dx == 0.0 && dy == 0.0) continue
+
+            val t = ((x0 - x1) * dx + (y0 - y1) * dy) / (dx * dx + dy * dy)
+            val closestX = when { t < 0 -> x1; t > 1 -> x2; else -> x1 + t * dx }
+            val closestY = when { t < 0 -> y1; t > 1 -> y2; else -> y1 + t * dy }
+            
+            val projLon = closestX / cosLat
+            val projLat = closestY
+            val d = distanceMeters(lat, lon, projLat, projLon)
+            if (d < minDistance) minDistance = d
+        }
+        return minDistance
+    }
+
+    fun calculateBearing(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val phi1 = Math.toRadians(lat1); val phi2 = Math.toRadians(lat2)
+        val deltaLambda = Math.toRadians(lon2 - lon1)
+        val y = sin(deltaLambda) * cos(phi2)
+        val x = cos(phi1) * sin(phi2) - sin(phi1) * cos(phi2) * cos(deltaLambda)
+        return (Math.toDegrees(atan2(y, x)) + 360.0) % 360.0
+    }
+
+    fun simulateMovement(lastLoc: Location, timeDeltaMs: Long): Location {
+        val distanceMeters = (lastLoc.speed) * (timeDeltaMs / 1000f)
+        val r = 6371000.0
+        val lat1 = Math.toRadians(lastLoc.latitude)
+        val lon1 = Math.toRadians(lastLoc.longitude)
+        val brng = Math.toRadians(lastLoc.bearing.toDouble())
+        val lat2 = asin(sin(lat1) * cos(distanceMeters / r) + cos(lat1) * sin(distanceMeters / r) * cos(brng))
+        val lon2 = lon1 + atan2(sin(brng) * sin(distanceMeters / r) * cos(lat1), cos(distanceMeters / r) - sin(lat1) * sin(lat2))
+        return Location(lastLoc).apply {
+            latitude = Math.toDegrees(lat2)
+            longitude = Math.toDegrees(lon2)
+            provider = "simulated"
+        }
+    }
+
+    fun snapToRoute(lat: Double, lon: Double, routePts: List<Point>): Pair<Double, Double> {
+        if (routePts.isEmpty()) return lat to lon
+        var minDistance = Double.MAX_VALUE
+        var snappedLat = lat
+        var snappedLon = lon
+        val cosLat = cos(Math.toRadians(lat))
+
+        for (i in 0 until routePts.size - 1) {
+            val p1 = routePts[i]
+            val p2 = routePts[i+1]
+            val x0 = lon * cosLat; val y0 = lat
+            val x1 = p1.longitude() * cosLat; val y1 = p1.latitude()
+            val x2 = p2.longitude() * cosLat; val y2 = p2.latitude()
+            val dx = x2 - x1
+            val dy = y2 - y1
+            if (dx == 0.0 && dy == 0.0) continue
+
+            val t = ((x0 - x1) * dx + (y0 - y1) * dy) / (dx * dx + dy * dy)
+            val closestX = when { t < 0 -> x1; t > 1 -> x2; else -> x1 + t * dx }
+            val closestY = when { t < 0 -> y1; t > 1 -> y2; else -> y1 + t * dy }
+
+            val projLon = closestX / cosLat
+            val projLat = closestY
+            val d = distanceMeters(lat, lon, projLat, projLon)
+            if (d < minDistance) {
+                minDistance = d
+                snappedLat = projLat
+                snappedLon = projLon
+            }
+        }
+        return if (minDistance < 50.0) snappedLat to snappedLon else lat to lon
+    }
+}
+
 class NavigationService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -231,54 +328,6 @@ private fun rememberSpeaker(): Pair<TextToSpeech?, Boolean> {
     return tts to ready
 }
 
-private fun simulateMovement(lastLoc: Location, timeDeltaMs: Long): Location {
-    val distanceMeters = (lastLoc.speed) * (timeDeltaMs / 1000f)
-    val r = 6371000.0
-    val lat1 = Math.toRadians(lastLoc.latitude)
-    val lon1 = Math.toRadians(lastLoc.longitude)
-    val brng = Math.toRadians(lastLoc.bearing.toDouble())
-    val lat2 = asin(sin(lat1) * cos(distanceMeters / r) + cos(lat1) * sin(distanceMeters / r) * cos(brng))
-    val lon2 = lon1 + atan2(sin(brng) * sin(distanceMeters / r) * cos(lat1), cos(distanceMeters / r) - sin(lat1) * sin(lat2))
-    return Location(lastLoc).apply {
-        latitude = Math.toDegrees(lat2)
-        longitude = Math.toDegrees(lon2)
-        provider = "simulated"
-    }
-}
-
-private fun snapToRoute(lat: Double, lon: Double, routePts: List<Point>): Pair<Double, Double> {
-    if (routePts.isEmpty()) return lat to lon
-    var minDistance = Double.MAX_VALUE
-    var snappedLat = lat
-    var snappedLon = lon
-    val cosLat = cos(Math.toRadians(lat))
-
-    for (i in 0 until routePts.size - 1) {
-        val p1 = routePts[i]
-        val p2 = routePts[i+1]
-        val x0 = lon * cosLat; val y0 = lat
-        val x1 = p1.longitude() * cosLat; val y1 = p1.latitude()
-        val x2 = p2.longitude() * cosLat; val y2 = p2.latitude()
-        val dx = x2 - x1
-        val dy = y2 - y1
-        if (dx == 0.0 && dy == 0.0) continue
-
-        val t = ((x0 - x1) * dx + (y0 - y1) * dy) / (dx * dx + dy * dy)
-        val closestX = when { t < 0 -> x1; t > 1 -> x2; else -> x1 + t * dx }
-        val closestY = when { t < 0 -> y1; t > 1 -> y2; else -> y1 + t * dy }
-
-        val projLon = closestX / cosLat
-        val projLat = closestY
-        val d = distanceMeters(lat, lon, projLat, projLon)
-        if (d < minDistance) {
-            minDistance = d
-            snappedLat = projLat
-            snappedLon = projLon
-        }
-    }
-    return if (minDistance < 50.0) snappedLat to snappedLon else lat to lon
-}
-
 @Composable
 private fun App(client: FusedLocationProviderClient) {
     val context = LocalContext.current
@@ -361,7 +410,7 @@ private fun App(client: FusedLocationProviderClient) {
                 val timeSinceLastGps = System.currentTimeMillis() - effectiveGps!!.time
                 if (timeSinceLastGps > 12000 && effectiveGps!!.speed > 3f) {
                     isSimulating = true
-                    effectiveGps = simulateMovement(effectiveGps!!, 1000)
+                    effectiveGps = GeoUtils.simulateMovement(effectiveGps!!, 1000)
                     effectiveGps!!.time = System.currentTimeMillis()
                 }
             }
@@ -377,7 +426,7 @@ private fun App(client: FusedLocationProviderClient) {
     var showStopButton by remember { mutableStateOf(true) }
 
     val currentStep = route?.steps?.getOrNull(stepIndex)
-    val distanceToStep = if (effectiveGps != null && currentStep != null) distanceMeters(effectiveGps!!.latitude, effectiveGps!!.longitude, currentStep.lat, currentStep.lon) else Double.NaN
+    val distanceToStep = if (effectiveGps != null && currentStep != null) GeoUtils.distanceMeters(effectiveGps!!.latitude, effectiveGps!!.longitude, currentStep.lat, currentStep.lon) else Double.NaN
     val speed = ((effectiveGps?.speed ?: 0f) * 3.6f).roundToInt().coerceAtLeast(0)
     val remainingDistance = route?.steps?.drop(stepIndex)?.sumOf { it.distance } ?: 0.0
     val remainingDuration = route?.steps?.drop(stepIndex)?.sumOf { it.duration } ?: 0.0
@@ -410,13 +459,13 @@ private fun App(client: FusedLocationProviderClient) {
         if (stepIndex < steps.lastIndex && distanceToStep < 30) stepIndex++
 
         val s = steps.getOrNull(stepIndex)
-        if (s != null && stepIndex != lastSpoken && distanceMeters(effectiveGps!!.latitude, effectiveGps!!.longitude, s.lat, s.lon) < 300) {
-            if (!muted && ttsReady) tts?.speak("Tra ${distanceMeters(effectiveGps!!.latitude, effectiveGps!!.longitude, s.lat, s.lon).roundToInt()} metri, ${s.text}", TextToSpeech.QUEUE_ADD, null, "step-$stepIndex")
+        if (s != null && stepIndex != lastSpoken && GeoUtils.distanceMeters(effectiveGps!!.latitude, effectiveGps!!.longitude, s.lat, s.lon) < 300) {
+            if (!muted && ttsReady) tts?.speak("Tra ${GeoUtils.distanceMeters(effectiveGps!!.latitude, effectiveGps!!.longitude, s.lat, s.lon).roundToInt()} metri, ${s.text}", TextToSpeech.QUEUE_ADD, null, "step-$stepIndex")
             lastSpoken = stepIndex
         }
 
         val unalerted = AppState.activeSafetyDevices.value.filter { it !in AppState.alertedDevices }
-        val nearbyDevice = unalerted.firstOrNull { distanceMeters(effectiveGps!!.latitude, effectiveGps!!.longitude, it.lat, it.lon) < 500 }
+        val nearbyDevice = unalerted.firstOrNull { GeoUtils.distanceMeters(effectiveGps!!.latitude, effectiveGps!!.longitude, it.lat, it.lon) < 500 }
         
         if (nearbyDevice != null) {
             AppState.alertedDevices.add(nearbyDevice)
@@ -437,7 +486,7 @@ private fun App(client: FusedLocationProviderClient) {
             }
         }
 
-        val offRoute = distanceToPolyline(effectiveGps!!.latitude, effectiveGps!!.longitude, route!!.points) > 80
+        val offRoute = GeoUtils.distanceToPolyline(effectiveGps!!.latitude, effectiveGps!!.longitude, route!!.points) > 80
         if (offRoute && !isSimulating && effectiveGps!!.accuracy < 30f && currentTime - lastReroute > 15000) {
             lastReroute = currentTime
             scope.launch {
@@ -445,7 +494,7 @@ private fun App(client: FusedLocationProviderClient) {
                     val currentBearing = if (effectiveGps!!.hasBearing() && effectiveGps!!.speed > 1.5f) effectiveGps!!.bearing.toDouble() else null
                     val newRoute = fetchRoute(effectiveGps!!, place!!, avoidTolls, avoidHighways, currentBearing)
                     route = newRoute
-                    AppState.activeSafetyDevices.value = AppState.safetyDevices.value.filter { distanceToPolyline(it.lat, it.lon, newRoute.points) < 100.0 }
+                    AppState.activeSafetyDevices.value = AppState.safetyDevices.value.filter { GeoUtils.distanceToPolyline(it.lat, it.lon, newRoute.points) < 100.0 }
                     stepIndex = 0; lastSpoken = -1
                     if (!muted && ttsReady) tts?.speak("Ricalcolo in corso", TextToSpeech.QUEUE_FLUSH, null, "reroute")
                 } catch (_: Exception) {}
@@ -490,7 +539,7 @@ private fun App(client: FusedLocationProviderClient) {
                             } else if (route != null) {
                                 OverviewCard(route!!, place, onStart = {
                                     navigating = true; isSearchExpanded = false; followUser = true; showStopButton = true
-                                    AppState.activeSafetyDevices.value = AppState.safetyDevices.value.filter { distanceToPolyline(it.lat, it.lon, route!!.points) < 100.0 }
+                                    AppState.activeSafetyDevices.value = AppState.safetyDevices.value.filter { GeoUtils.distanceToPolyline(it.lat, it.lon, route!!.points) < 100.0 }
                                 }, onReset = { resetNavigation() })
                             } else if (isSearchExpanded) {
                                 SearchExpandedCard(query, { query = it }, granted, { ask.launch(Manifest.permission.ACCESS_FINE_LOCATION) }, busy, error, searchResults, searchHistory, avoidTolls, { avoidTolls = it }, avoidHighways, { avoidHighways = it }, themeMode, { AppState.themeMode.value = it },
@@ -526,7 +575,7 @@ private fun App(client: FusedLocationProviderClient) {
                             } else if (route != null) {
                                 OverviewCard(route!!, place, onStart = {
                                     navigating = true; isSearchExpanded = false; followUser = true; showStopButton = true
-                                    AppState.activeSafetyDevices.value = AppState.safetyDevices.value.filter { distanceToPolyline(it.lat, it.lon, route!!.points) < 100.0 }
+                                    AppState.activeSafetyDevices.value = AppState.safetyDevices.value.filter { GeoUtils.distanceToPolyline(it.lat, it.lon, route!!.points) < 100.0 }
                                 }, onReset = { resetNavigation() })
                             } else if (isSearchExpanded) {
                                 SearchExpandedCard(query, { query = it }, granted, { ask.launch(Manifest.permission.ACCESS_FINE_LOCATION) }, busy, error, searchResults, searchHistory, avoidTolls, { avoidTolls = it }, avoidHighways, { avoidHighways = it }, themeMode, { AppState.themeMode.value = it },
@@ -813,13 +862,13 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                     }
                 } catch (e: Exception) {}
 
-                val snap = if (navigating && route != null && location != null) snapToRoute(location.latitude, location.longitude, route.points) else null
+                val snap = if (navigating && route != null && location != null) GeoUtils.snapToRoute(location.latitude, location.longitude, route.points) else null
                 val targetLat = snap?.first ?: location?.latitude
                 val targetLon = snap?.second ?: location?.longitude
 
                 if (targetLat != null && targetLon != null) {
-                    val targetBearing = if (!lastLat.isNaN() && distanceMeters(lastLat, lastLon, targetLat, targetLon) > 1.0) {
-                        calculateBearing(lastLat, lastLon, targetLat, targetLon)
+                    val targetBearing = if (!lastLat.isNaN() && GeoUtils.distanceMeters(lastLat, lastLon, targetLat, targetLon) > 1.0) {
+                        GeoUtils.calculateBearing(lastLat, lastLon, targetLat, targetLon)
                     } else if (location != null && location.hasBearing() && speed > 5) {
                         location.bearing.toDouble()
                     } else {
@@ -932,43 +981,4 @@ private suspend fun fetchRoute(l: Location, p: Place, avoidTolls: Boolean, avoid
         }
         RouteData(pts, summary.getDouble("distance"), summary.getDouble("duration"), steps)
     } finally { c.disconnect() }
-}
-
-private fun calculateBearing(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-    val phi1 = Math.toRadians(lat1); val phi2 = Math.toRadians(lat2)
-    val deltaLambda = Math.toRadians(lon2 - lon1)
-    val y = sin(deltaLambda) * cos(phi2)
-    val x = cos(phi1) * sin(phi2) - sin(phi1) * cos(phi2) * cos(deltaLambda)
-    return (Math.toDegrees(atan2(y, x)) + 360.0) % 360.0
-}
-
-private fun distanceMeters(a: Double, b: Double, c: Double, d: Double): Double {
-    val r = 6371000.0; val p1 = Math.toRadians(a); val p2 = Math.toRadians(c); val dp = Math.toRadians(c - a); val dl = Math.toRadians(d - b)
-    val x = sin(dp / 2).pow(2) + cos(p1) * cos(p2) * sin(dl / 2).pow(2)
-    return 2 * r * atan2(sqrt(x), sqrt(1 - x))
-}
-
-private fun distanceToPolyline(lat: Double, lon: Double, pts: List<Point>): Double {
-    if (pts.isEmpty()) return Double.MAX_VALUE
-    var minDistance = Double.MAX_VALUE
-    val cosLat = cos(Math.toRadians(lat))
-
-    for (i in 0 until pts.size - 1) {
-        val p1 = pts[i]
-        val p2 = pts[i+1]
-        val x0 = lon * cosLat; val y0 = lat
-        val x1 = p1.longitude() * cosLat; val y1 = p1.latitude()
-        val x2 = p2.longitude() * cosLat; val y2 = p2.latitude()
-        val dx = x2 - x1
-        val dy = y2 - y1
-        if (dx == 0.0 && dy == 0.0) continue
-        val t = ((x0 - x1) * dx + (y0 - y1) * dy) / (dx * dx + dy * dy)
-        val closestX = when { t < 0 -> x1; t > 1 -> x2; else -> x1 + t * dx }
-        val closestY = when { t < 0 -> y1; t > 1 -> y2; else -> y1 + t * dy }
-        val projLon = closestX / cosLat
-        val projLat = closestY
-        val d = distanceMeters(lat, lon, projLat, projLon)
-        if (d < minDistance) minDistance = d
-    }
-    return minDistance
 }
