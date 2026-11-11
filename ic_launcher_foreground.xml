@@ -1,0 +1,18 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- freccia di rotta ambra con alone -->
+    <path
+        android:fillColor="#33F5A93B"
+        android:pathData="M54,22 L78,80 L54,67 L30,80 Z"
+        android:strokeColor="#55F5A93B"
+        android:strokeWidth="8" />
+    <path
+        android:fillColor="#F5A93B"
+        android:pathData="M54,26 L74,76 L54,65 L34,76 Z" />
+    <path
+        android:fillColor="#4FD6E6"
+        android:pathData="M54,56 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+</vector>

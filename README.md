@@ -1,40 +1,66 @@
-# StradaSafe 🧭
+# Rotta 🧭
 
-StradaSafe è un'applicazione di navigazione Android open-source, progettata originariamente per le complesse reti viarie della Liguria. È costruita con un'architettura **"Zero-Account"**, focalizzata al 100% sulla privacy dell'utente e sull'efficienza alla guida.
+Navigatore Android per la Liguria (e non solo): l'interfaccia e le mappe di **Rotta**, con le funzioni di sicurezza alla guida di **StradaSafe**. Nessun account, nessuna chiave API, nessun log.
 
-L'interfaccia utente è disegnata seguendo i principi del **Brutalismo Digitale** e del **Liquid Glassmorphism**: nessun fronzolo, geometrie squadrate, massima leggibilità sotto la luce del sole e zero distrazioni durante la marcia.
+## Cosa fa
 
-## ✨ Funzionalità Principali
+Da Rotta:
 
-*   **Routing Avanzato (ORS):** Motore di calcolo basato su OpenRouteService. Supporta il routing dinamico con esclusione rigorosa di Autostrade e Pedaggi.
-*   **Dead Reckoning (Simulazione Galleria):** Algoritmo vettoriale integrato. Quando il segnale GPS viene perso (es. nei lunghi trafori appenninici), l'app calcola e simula l'avanzamento del veicolo basandosi sull'ultima velocità e direzione registrate.
-*   **Navigazione in Background (Foreground Service):** Il GPS e le indicazioni vocali TTS (Text-to-Speech) non si interrompono mai, nemmeno spegnendo lo schermo o ricevendo una telefonata.
-*   **Calcolo Tutor e Velox:** Monitoraggio in tempo reale della velocità media all'interno delle zone Tutor e avvisi spaziali intelligenti (segnala solo i pericoli fisicamente presenti sulla tua rotta, ignorando le strade parallele).
-*   **Interfaccia Adattiva:** Layout a isole fluttuanti (Floating Islands) per massimizzare l'area visibile della mappa. Transizione fluida e riposizionamento dinamico degli elementi passando dalla modalità Portrait a quella Landscape.
-*   **Privacy First:** Nessuna registrazione richiesta. Nessun log utente. 
+- Mappa 3D con rilievo ed edifici (MapLibre GL + OpenFreeMap), tre temi: Notte, Neon, Mercer · noir 1960
+- Ricerca indirizzi (Photon), percorsi auto / bici / a piedi con **tappe** e **alternative** (Valhalla, riserva OSRM)
+- Evita pedaggi / autostrade, profilo altimetrico, costo carburante stimato
+- Navigazione con voce italiana, ricalcolo automatico, condivisione dell'orario di arrivo
+- Casa, Lavoro, destinazioni recenti, riepilogo viaggio, "Ho parcheggiato qui"
 
-## 🛠 Stack Tecnologico
+Da StradaSafe:
 
-*   **Linguaggio:** Kotlin
-*   **UI Toolkit:** Jetpack Compose (Material 3)
-*   **Motore Cartografico:** MapLibre GL Android (Mappe vettoriali leggere e personalizzabili)
-*   **Dati Cartografici:** OpenStreetMap (OSM) via OpenFreeMap
-*   **Motore di Routing:** OpenRouteService (API REST in POST)
-*   **Servizi Posizione:** Google Fused Location Provider
+- **Autovelox e Tutor**: avviso vocale e a schermo 500 m prima, solo per i dispositivi che stanno davvero sul percorso (una strada parallela non fa scattare nulla); sono segnati anche sulla mappa e nel riepilogo prima di partire
+- **Velocità media nel tratto Tutor**, calcolata fra un portale e il successivo
+- **Limite di velocità** della strada (OpenStreetMap via Overpass) accanto al tachimetro, che diventa rosso se lo superi
+- **Galleria**: se il GPS sparisce per più di 6 secondi mentre sei in movimento, la posizione avanza lungo il percorso all'ultima velocità nota
+- **Navigazione a schermo spento**: un servizio in primo piano tiene attivi GPS e voce anche con un'altra app davanti
 
-## 🚀 Installazione e Build
+Gli avvisi si spengono da Impostazioni → "Avvisi autovelox e Tutor, limite di velocità".
 
-1. Clona il repository:
-   ```bash
-   git clone https://github.com/Palito-Lelito/strdasafe.git
-   ```
-2. Crea una chiave gratuita su [openrouteservice.org](https://openrouteservice.org/dev/#/signup) e inseriscila in `local.properties` (file da **non** committare):
-   ```properties
-   ORS_API_KEY=la_tua_chiave
-   ```
-   In alternativa esporta la variabile d'ambiente `ORS_API_KEY` (è così che la riceve la GitHub Action, tramite il secret omonimo).
-3. Compila l'APK di debug (servono JDK 17, Android SDK 36 e Gradle 8.11.1+):
-   ```bash
-   gradle :app:assembleDebug
-   ```
-   L'APK viene generato in `app/build/outputs/apk/debug/app-debug.apk`.
+> L'elenco dei dispositivi (`app/src/main/assets/www/data/safety_devices.json`) è un file dimostrativo per la Liguria: non è completo né garantito aggiornato. Rispetta sempre la segnaletica.
+
+## Compilare l'APK
+
+**Con GitHub**: a ogni push su `main` la Action "Compila APK StradaSafe" (`.github/workflows/main.yml`, la stessa di prima) costruisce l'APK di debug; lo trovi negli *Artifacts* della run, con il nome `StradaSafe-Liguria-APK`.
+
+**Sul PC** (JDK 17, Android SDK 36, Gradle 8.11.1 o successivo):
+
+```bash
+gradle :app:assembleDebug
+```
+
+L'APK esce in `app/build/outputs/apk/debug/app-debug.apk`. In alternativa apri la cartella con Android Studio e premi Run.
+
+## Provarla nel browser
+
+La web app sta in `app/src/main/assets/www` e gira anche da sola:
+
+```bash
+cd app/src/main/assets/www
+python -m http.server 8765
+```
+
+poi apri `http://localhost:8765`. Con **Simula** percorri la rotta senza GPS: è il modo più rapido per vedere avvisi autovelox, Tutor e limite.
+
+## Struttura
+
+```
+app/src/main/java/it/lucarisso/rotta/
+  MainActivity.java        WebView + voce di sistema + ponte con la web app
+  NavigationService.java   servizio in primo piano: notifica e GPS durante la navigazione
+app/src/main/assets/www/
+  index.html, css/         interfaccia
+  js/app.js                mappa, navigazione, avvisi, stima in galleria
+  js/safety.js             autovelox/Tutor sul percorso, limite di velocità
+  js/routing.js            ricerca, percorsi, meteo
+  js/geo.js                distanze e proiezione sulla rotta
+  js/voice.js, store.js, themes.js, fx.js, icons.js
+  data/safety_devices.json elenco autovelox e Tutor
+```
+
+Servizi usati (istanze pubbliche gratuite, adatte all'uso personale): OpenFreeMap, Photon, Valhalla, OSRM, Overpass, Open-Meteo.
