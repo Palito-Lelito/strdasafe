@@ -3,9 +3,6 @@ package it.stradasafe.liguria
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -14,7 +11,6 @@ import android.location.Location
 import android.media.AudioAttributes
 import android.os.Build
 import android.os.Bundle
-import android.os.IBinder
 import android.speech.tts.TextToSpeech
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -44,7 +40,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.*
 import kotlinx.coroutines.Dispatchers
@@ -79,8 +74,8 @@ import java.net.URLEncoder
 import java.util.Locale
 import kotlin.math.*
 
-// CHIAVE OPENROUTESERVICE DELL'UTENTE
-private const val ORS_API_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImZjZDcxY2MyNmJiNjQwYzU4OTIzZDY0ZGE2MDEyMWJiIiwiaCI6Im11cm11cjY0In0="
+// La chiave OpenRouteService viene iniettata in fase di build (local.properties o variabile ORS_API_KEY)
+private val ORS_API_KEY: String get() = BuildConfig.ORS_API_KEY
 private const val SEARCH_BASE = "https://nominatim.openstreetmap.org"
 
 // ==========================================
@@ -177,30 +172,6 @@ object GeoUtils {
             }
         }
         return if (minDistance < 50.0) snappedLat to snappedLon else lat to lon
-    }
-}
-
-class NavigationService : Service() {
-    override fun onBind(intent: Intent?): IBinder? = null
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == "STOP") {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
-            return START_NOT_STICKY
-        }
-        val channelId = "stradasafe_nav"
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(channelId, "Navigazione Attiva", NotificationManager.IMPORTANCE_LOW)
-            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
-        }
-        val notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("StradaSafe 1.1")
-            .setContentText("Navigazione in background attiva")
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-            .setOngoing(true)
-            .build()
-        startForeground(1, notification)
-        return START_STICKY
     }
 }
 
@@ -388,6 +359,7 @@ private fun App(client: FusedLocationProviderClient) {
 
     var granted by remember { mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) }
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
+    val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val rawGps = rememberGps(client, granted)
     
     var effectiveGps by remember { mutableStateOf<Location?>(null) }
@@ -403,16 +375,16 @@ private fun App(client: FusedLocationProviderClient) {
         if (rawGps != null) { effectiveGps = rawGps; isSimulating = false }
     }
     
+    // Il confronto va fatto con l'ultimo fix REALE: la posizione simulata ha sempre un timestamp recente
+    val latestRawGps by rememberUpdatedState(rawGps)
     LaunchedEffect(navigating) {
-        while(navigating) {
+        while (navigating) {
             delay(1000)
-            if (effectiveGps != null) {
-                val timeSinceLastGps = System.currentTimeMillis() - effectiveGps!!.time
-                if (timeSinceLastGps > 12000 && effectiveGps!!.speed > 3f) {
-                    isSimulating = true
-                    effectiveGps = GeoUtils.simulateMovement(effectiveGps!!, 1000)
-                    effectiveGps!!.time = System.currentTimeMillis()
-                }
+            val current = effectiveGps ?: continue
+            val lastRealFix = latestRawGps?.time ?: continue
+            if (System.currentTimeMillis() - lastRealFix > 12000 && current.speed > 3f) {
+                isSimulating = true
+                effectiveGps = GeoUtils.simulateMovement(current, 1000).apply { time = System.currentTimeMillis() }
             }
         }
     }
@@ -423,13 +395,20 @@ private fun App(client: FusedLocationProviderClient) {
     var lastSpoken by remember { mutableIntStateOf(-1) }
     var lastReroute by remember { mutableLongStateOf(0L) }
     var avgTutorSpeed by remember { mutableIntStateOf(0) }
+    var tutorMeters by remember { mutableDoubleStateOf(0.0) }
+    var tutorLastFix by remember { mutableStateOf<Location?>(null) }
     var showStopButton by remember { mutableStateOf(true) }
 
     val currentStep = route?.steps?.getOrNull(stepIndex)
     val distanceToStep = if (effectiveGps != null && currentStep != null) GeoUtils.distanceMeters(effectiveGps!!.latitude, effectiveGps!!.longitude, currentStep.lat, currentStep.lon) else Double.NaN
     val speed = ((effectiveGps?.speed ?: 0f) * 3.6f).roundToInt().coerceAtLeast(0)
-    val remainingDistance = route?.steps?.drop(stepIndex)?.sumOf { it.distance } ?: 0.0
-    val remainingDuration = route?.steps?.drop(stepIndex)?.sumOf { it.duration } ?: 0.0
+    // Residuo = tratto ancora da percorrere fino alla prossima manovra + tutti gli step successivi
+    val stepsAhead = route?.steps?.drop(stepIndex).orEmpty()
+    val previousStep = route?.steps?.getOrNull(stepIndex - 1)
+    val metersToStep = if (previousStep != null && !distanceToStep.isNaN()) distanceToStep.coerceAtMost(previousStep.distance) else 0.0
+    val secondsToStep = if (previousStep != null && previousStep.distance > 0) previousStep.duration * metersToStep / previousStep.distance else 0.0
+    val remainingDistance = metersToStep + stepsAhead.sumOf { it.distance }
+    val remainingDuration = secondsToStep + stepsAhead.sumOf { it.duration }
 
     LaunchedEffect(showStopButton, navigating) {
         if (navigating && showStopButton) { delay(10000); showStopButton = false }
@@ -438,35 +417,55 @@ private fun App(client: FusedLocationProviderClient) {
     LaunchedEffect(navigating) {
         try {
             val serviceIntent = Intent(context, NavigationService::class.java)
-            if (navigating) ContextCompat.startForegroundService(context, serviceIntent)
-            else { serviceIntent.action = "STOP"; context.startService(serviceIntent) }
-        } catch (e: Exception) {}
+            if (navigating) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                    askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+                ContextCompat.startForegroundService(context, serviceIntent)
+            } else {
+                context.stopService(serviceIntent)
+            }
+        } catch (_: Exception) {}
     }
 
     LaunchedEffect(effectiveGps, navigating, route) {
-        if (!navigating || effectiveGps == null || route == null) return@LaunchedEffect
+        val gps = effectiveGps
+        val activeRoute = route
+        if (!navigating || gps == null || activeRoute == null) return@LaunchedEffect
         val currentTime = System.currentTimeMillis()
 
         if (currentTime - AppState.lastSpeedLimitCheck.longValue > 20000 && !isSimulating) {
             AppState.lastSpeedLimitCheck.longValue = currentTime
             scope.launch {
-                val limit = fetchSpeedLimit(effectiveGps!!.latitude, effectiveGps!!.longitude)
-                if (limit != null) speedLimit = limit
+                val limit = fetchSpeedLimit(gps.latitude, gps.longitude)
+                if (limit != null && AppState.navigating.value) speedLimit = limit
             }
         }
 
-        val steps = route!!.steps
+        val steps = activeRoute.steps
         if (stepIndex < steps.lastIndex && distanceToStep < 30) stepIndex++
 
         val s = steps.getOrNull(stepIndex)
-        if (s != null && stepIndex != lastSpoken && GeoUtils.distanceMeters(effectiveGps!!.latitude, effectiveGps!!.longitude, s.lat, s.lon) < 300) {
-            if (!muted && ttsReady) tts?.speak("Tra ${GeoUtils.distanceMeters(effectiveGps!!.latitude, effectiveGps!!.longitude, s.lat, s.lon).roundToInt()} metri, ${s.text}", TextToSpeech.QUEUE_ADD, null, "step-$stepIndex")
-            lastSpoken = stepIndex
+        if (s != null && stepIndex != lastSpoken) {
+            val metersToManeuver = GeoUtils.distanceMeters(gps.latitude, gps.longitude, s.lat, s.lon)
+            if (metersToManeuver < 300) {
+                if (!muted && ttsReady) tts?.speak("Tra ${metersToManeuver.roundToInt()} metri, ${s.text}", TextToSpeech.QUEUE_ADD, null, "step-$stepIndex")
+                lastSpoken = stepIndex
+            }
+        }
+
+        // Velocita' media Tutor: metri realmente percorsi dall'ingresso / tempo trascorso
+        if (AppState.inTutorZone.value) {
+            tutorLastFix?.let { tutorMeters += GeoUtils.distanceMeters(it.latitude, it.longitude, gps.latitude, gps.longitude) }
+            tutorLastFix = gps
+            val elapsedSec = (currentTime - AppState.tutorStartTime.longValue) / 1000.0
+            if (elapsedSec > 5) avgTutorSpeed = (tutorMeters / elapsedSec * 3.6).roundToInt()
         }
 
         val unalerted = AppState.activeSafetyDevices.value.filter { it !in AppState.alertedDevices }
-        val nearbyDevice = unalerted.firstOrNull { GeoUtils.distanceMeters(effectiveGps!!.latitude, effectiveGps!!.longitude, it.lat, it.lon) < 500 }
-        
+        val nearbyDevice = unalerted.firstOrNull { GeoUtils.distanceMeters(gps.latitude, gps.longitude, it.lat, it.lon) < 500 }
+
         if (nearbyDevice != null) {
             AppState.alertedDevices.add(nearbyDevice)
             val isTutor = nearbyDevice.type.lowercase().contains("tutor")
@@ -476,9 +475,11 @@ private fun App(client: FusedLocationProviderClient) {
                     AppState.inTutorZone.value = true
                     AppState.tutorStartTime.longValue = currentTime
                     AppState.tutorStartDistanceRemaining.doubleValue = remainingDistance
+                    tutorMeters = 0.0; tutorLastFix = gps; avgTutorSpeed = 0
                     if (!muted && ttsReady) tts?.speak("Inizio misurazione Tutor", TextToSpeech.QUEUE_ADD, null, "tutor_start")
                 } else {
                     AppState.inTutorZone.value = false
+                    tutorLastFix = null
                     if (!muted && ttsReady) tts?.speak("Fine zona Tutor", TextToSpeech.QUEUE_ADD, null, "tutor_end")
                 }
             } else {
@@ -486,17 +487,19 @@ private fun App(client: FusedLocationProviderClient) {
             }
         }
 
-        val offRoute = GeoUtils.distanceToPolyline(effectiveGps!!.latitude, effectiveGps!!.longitude, route!!.points) > 80
-        if (offRoute && !isSimulating && effectiveGps!!.accuracy < 30f && currentTime - lastReroute > 15000) {
+        val destination = place
+        val offRoute = GeoUtils.distanceToPolyline(gps.latitude, gps.longitude, activeRoute.points) > 80
+        if (destination != null && offRoute && !isSimulating && gps.accuracy < 30f && currentTime - lastReroute > 15000) {
             lastReroute = currentTime
             scope.launch {
                 try {
-                    val currentBearing = if (effectiveGps!!.hasBearing() && effectiveGps!!.speed > 1.5f) effectiveGps!!.bearing.toDouble() else null
-                    val newRoute = fetchRoute(effectiveGps!!, place!!, avoidTolls, avoidHighways, currentBearing)
+                    val newRoute = fetchRoute(gps, destination, avoidTolls, avoidHighways)
+                    // Se nel frattempo il viaggio e' stato terminato o la meta e' cambiata, il ricalcolo va scartato
+                    if (!AppState.navigating.value || AppState.place.value != destination) return@launch
                     route = newRoute
                     AppState.activeSafetyDevices.value = AppState.safetyDevices.value.filter { GeoUtils.distanceToPolyline(it.lat, it.lon, newRoute.points) < 100.0 }
                     stepIndex = 0; lastSpoken = -1
-                    if (!muted && ttsReady) tts?.speak("Ricalcolo in corso", TextToSpeech.QUEUE_FLUSH, null, "reroute")
+                    if (!muted && ttsReady) tts?.speak("Percorso ricalcolato", TextToSpeech.QUEUE_FLUSH, null, "reroute")
                 } catch (_: Exception) {}
             }
         }
@@ -549,7 +552,7 @@ private fun App(client: FusedLocationProviderClient) {
                                         val newHistory = (listOf(p) + searchHistory).distinctBy { it.name }.take(5)
                                         searchHistory = newHistory; saveHistory(context, newHistory)
                                         try { 
-                                            route = fetchRoute(effectiveGps ?: error("Attendi il segnale GPS prima di calcolare"), p, avoidTolls, avoidHighways)
+                                            route = fetchRoute(effectiveGps ?: throw IllegalStateException("Attendi il segnale GPS prima di calcolare"), p, avoidTolls, avoidHighways)
                                             isSearchExpanded = false
                                         } catch (e: Exception) { error = e.message } finally { busy = false } 
                                     } },
@@ -585,7 +588,7 @@ private fun App(client: FusedLocationProviderClient) {
                                         val newHistory = (listOf(p) + searchHistory).distinctBy { it.name }.take(5)
                                         searchHistory = newHistory; saveHistory(context, newHistory)
                                         try { 
-                                            route = fetchRoute(effectiveGps ?: error("Attendi il segnale GPS prima di calcolare"), p, avoidTolls, avoidHighways) 
+                                            route = fetchRoute(effectiveGps ?: throw IllegalStateException("Attendi il segnale GPS prima di calcolare"), p, avoidTolls, avoidHighways) 
                                             isSearchExpanded = false 
                                         } catch (e: Exception) { error = e.message } finally { busy = false } 
                                     } },
@@ -634,7 +637,7 @@ private suspend fun fetchSpeedLimit(lat: Double, lon: Double): Int? = withContex
         val c = (URL("https://overpass-api.de/api/interpreter?data=$e").openConnection() as HttpURLConnection).apply {
             connectTimeout = 3000; readTimeout = 3000; requestMethod = "GET"; setRequestProperty("User-Agent", "StradaSafeLiguria/1.1")
         }
-        val res = c.inputStream.bufferedReader().use { it.readText() }
+        val res = try { c.inputStream.bufferedReader().use { it.readText() } } finally { c.disconnect() }
         val els = JSONObject(res).optJSONArray("elements") ?: return@withContext null
         for (i in 0 until els.length()) {
             val ms = els.getJSONObject(i).optJSONObject("tags")?.optString("maxspeed")
@@ -820,7 +823,7 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
     val mapView = remember { MapView(context) }
     var ready by remember { mutableStateOf(false) }
     var fitted by remember { mutableStateOf(false) }
-    var loadedStyle by remember { mutableStateOf("") }
+    val requestedStyle = remember { arrayOf("") }
     
     var lastLat by remember { mutableDoubleStateOf(Double.NaN) }
     var lastLon by remember { mutableDoubleStateOf(Double.NaN) }
@@ -833,7 +836,8 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
     AndroidView(
         factory = { mapView.apply { onCreate(null) } },
         update = { v ->
-            if (loadedStyle != mapStyleUrl) {
+            if (requestedStyle[0] != mapStyleUrl) {
+                requestedStyle[0] = mapStyleUrl
                 ready = false
                 v.getMapAsync { m ->
                     m.setStyle(Style.Builder().fromUri(mapStyleUrl)) { s ->
@@ -843,7 +847,7 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                         s.addLayer(CircleLayer("dest-l", "dest").withProperties(circleRadius(9f), circleColor("#32D74B")))
                         s.addSource(GeoJsonSource("safety"))
                         s.addLayer(CircleLayer("safety-l", "safety").withProperties(circleRadius(7f), circleColor("#FF453A"), circleStrokeColor("#FFFFFF"), circleStrokeWidth(2f)))
-                        loadedStyle = mapStyleUrl; ready = true
+                        if (requestedStyle[0] == mapStyleUrl) ready = true
                     }
                 }
             }
@@ -899,9 +903,11 @@ private fun NavMap(location: Location?, place: Place?, route: RouteData?, naviga
                 if (route != null) {
                     m.style?.getSourceAs<GeoJsonSource>("route")?.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(route.points)))
                     if (!navigating && !fitted) {
-                        val b = LatLngBounds.Builder()
-                        route.points.forEach { b.include(LatLng(it.latitude(), it.longitude())) }
-                        m.animateCamera(CameraUpdateFactory.newLatLngBounds(b.build(), 150), 800)
+                        try {
+                            val b = LatLngBounds.Builder()
+                            route.points.forEach { b.include(LatLng(it.latitude(), it.longitude())) }
+                            m.animateCamera(CameraUpdateFactory.newLatLngBounds(b.build(), 150), 800)
+                        } catch (_: Exception) {}
                         fitted = true
                     }
                 } else {
@@ -935,19 +941,13 @@ private suspend fun searchPlaces(q: String): List<Place> = withContext(Dispatche
     list
 }
 
-private suspend fun fetchRoute(l: Location, p: Place, avoidTolls: Boolean, avoidHighways: Boolean, currentBearing: Double? = null): RouteData = withContext(Dispatchers.IO) {
+private suspend fun fetchRoute(l: Location, p: Place, avoidTolls: Boolean, avoidHighways: Boolean): RouteData = withContext(Dispatchers.IO) {
+    if (ORS_API_KEY.isBlank()) error("Chiave OpenRouteService mancante: imposta ORS_API_KEY in local.properties")
     val urlStr = "https://api.openrouteservice.org/v2/directions/driving-car/geojson"
     val jsonBody = JSONObject().apply {
         put("coordinates", JSONArray().apply { put(JSONArray().apply { put(l.longitude); put(l.latitude) }); put(JSONArray().apply { put(p.lon); put(p.lat) }) })
         put("language", "it"); put("instructions", true)
         
-        if (currentBearing != null) {
-            put("bearings", JSONArray().apply {
-                put(JSONArray().apply { put(currentBearing.roundToInt()); put(90) })
-                put(JSONObject.NULL)
-            })
-        }
-
         val avoids = JSONArray()
         if (avoidTolls) avoids.put("tollways")
         if (avoidHighways) avoids.put("highways")
