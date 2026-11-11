@@ -26,4 +26,15 @@ L'interfaccia utente è disegnata seguendo i principi del **Brutalismo Digitale*
 
 1. Clona il repository:
    ```bash
-   git clone [https://github.com/Palito-Lelito/strdasafe.git](https://github.com/Palito-Lelito/strdasafe.git)
+   git clone https://github.com/Palito-Lelito/strdasafe.git
+   ```
+2. Crea una chiave gratuita su [openrouteservice.org](https://openrouteservice.org/dev/#/signup) e inseriscila in `local.properties` (file da **non** committare):
+   ```properties
+   ORS_API_KEY=la_tua_chiave
+   ```
+   In alternativa esporta la variabile d'ambiente `ORS_API_KEY` (è così che la riceve la GitHub Action, tramite il secret omonimo).
+3. Compila l'APK di debug (servono JDK 17, Android SDK 36 e Gradle 8.11.1+):
+   ```bash
+   gradle :app:assembleDebug
+   ```
+   L'APK viene generato in `app/build/outputs/apk/debug/app-debug.apk`.
